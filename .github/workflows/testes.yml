@@ -1,0 +1,30 @@
+name: Testes
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  testes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      - name: Build da imagem Docker
+        run: docker build -t gestao-demandas .
+      - name: Contêiner inicia com volume de propriedade do root
+        run: |
+          mkdir -p /tmp/dados && sudo chown root:root /tmp/dados
+          docker run -d --name gd -p 3000:3000 -v /tmp/dados:/app/data gestao-demandas
+          for i in $(seq 1 30); do
+            if curl -fs http://localhost:3000/api/auth/status; then exit 0; fi
+            sleep 1
+          done
+          docker logs gd
+          exit 1
