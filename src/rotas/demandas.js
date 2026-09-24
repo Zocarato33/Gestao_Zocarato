@@ -4,6 +4,7 @@ const express = require('express');
 const { db, transacao } = require('../db');
 const { filtroClientes, podeAcessarCliente, usuarioTemAcessoAoCliente } = require('../auth');
 const { listarColunas } = require('./colunas');
+const { montarLayout, aplicarObrigatorios } = require('../layout');
 const {
   Validador, ErroValidacao, naoEncontrado, idParam, hoje, somarDias, dataValida, termoLike,
   STATUS, PRIORIDADES, validarValorColuna,
@@ -167,7 +168,7 @@ r.get('/:id', async (req, res) => {
 /**
  * Valida os dados completos de uma demanda (campos padrão + personalizados).
  */
-async function validarDemanda(usuario, body, atual = null) {
+async function validarDemanda(usuario, body, atual = null, modo = 'criar', enviados = new Set()) {
   const v = new Validador(body)
     .texto('titulo', 'o título', { obrigatorio: true, min: 3, max: 200 })
     .texto('descricao', 'a descrição', { max: 5000 })
@@ -201,6 +202,7 @@ async function validarDemanda(usuario, body, atual = null) {
     if (res.erro) v.erro(`campo_${col.id}`, `${col.nome}: ${res.erro}`);
     else campos[col.id] = res.valor;
   }
+  aplicarObrigatorios(v, await montarLayout('demanda'), campos, modo, enviados);
   const d = v.verificar();
   d.campos = campos;
   return d;
@@ -218,7 +220,7 @@ async function salvarCampos(t, demandaId, campos) {
 }
 
 r.post('/', async (req, res) => {
-  const d = await validarDemanda(req.usuario, req.body);
+  const d = await validarDemanda(req.usuario, req.body, null, 'criar');
   const id = await transacao(async (t) => {
     const nova = await t.get(`INSERT INTO demandas
       (titulo, descricao, cliente_id, responsavel_id, status, prioridade, prazo, observacoes, criado_por)
@@ -236,6 +238,7 @@ async function atualizar(req, res, parcial) {
   const id = idParam(req.params.id);
   const atual = await carregarDemanda(req.usuario, id);
   let corpo = req.body || {};
+  let enviados = new Set();
   if (parcial) {
     // Edição em linha: combina os campos enviados com os dados atuais
     const base = {
@@ -246,12 +249,13 @@ async function atualizar(req, res, parcial) {
     const permitidos = Object.keys(base);
     const extra = {};
     for (const k of permitidos) if (Object.prototype.hasOwnProperty.call(corpo, k)) extra[k] = corpo[k];
+    enviados = new Set(Object.keys(extra));
     corpo = { ...base, ...extra, campos: corpo.campos || {} };
     if (Object.keys(extra).length === 0 && Object.keys(corpo.campos).length === 0) {
       throw new ErroValidacao({}, 'Nenhuma alteração enviada.');
     }
   }
-  const d = await validarDemanda(req.usuario, corpo, atual);
+  const d = await validarDemanda(req.usuario, corpo, atual, parcial ? 'parcial' : 'atualizar', enviados);
   await transacao(async (t) => {
     await t.exec(`UPDATE demandas SET titulo = ?, descricao = ?, cliente_id = ?, responsavel_id = ?, status = ?,
       prioridade = ?, prazo = ?, observacoes = ?, atualizado_em = now() WHERE id = ?`, [

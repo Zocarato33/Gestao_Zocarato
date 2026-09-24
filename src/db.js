@@ -138,9 +138,19 @@ const SCHEMA_SQL = `
     ordem INTEGER NOT NULL DEFAULT 0,
     criado_em TIMESTAMPTZ NOT NULL DEFAULT now()
   );
-  -- Colunas personalizadas servem a demandas ou a clientes; o nome é único dentro de cada uma
-  ALTER TABLE colunas ADD COLUMN IF NOT EXISTS entidade TEXT NOT NULL DEFAULT 'demanda'
-    CHECK (entidade IN ('demanda', 'cliente'));
+  -- Colunas personalizadas servem a demandas, clientes ou tabela de preços; o nome é único dentro de cada uma
+  ALTER TABLE colunas ADD COLUMN IF NOT EXISTS entidade TEXT NOT NULL DEFAULT 'demanda';
+  DO $$
+  BEGIN
+    IF NOT EXISTS (
+      SELECT 1 FROM pg_constraint
+      WHERE conrelid = 'colunas'::regclass AND conname = 'colunas_entidade_check'
+        AND pg_get_constraintdef(oid) LIKE '%preco%'
+    ) THEN
+      ALTER TABLE colunas DROP CONSTRAINT IF EXISTS colunas_entidade_check;
+      ALTER TABLE colunas ADD CONSTRAINT colunas_entidade_check CHECK (entidade IN ('demanda', 'cliente', 'preco'));
+    END IF;
+  END $$;
   DROP INDEX IF EXISTS idx_colunas_nome;
   CREATE UNIQUE INDEX IF NOT EXISTS idx_colunas_entidade_nome ON colunas (entidade, lower(nome));
 
@@ -159,6 +169,39 @@ const SCHEMA_SQL = `
     PRIMARY KEY (cliente_id, coluna_id)
   );
   CREATE INDEX IF NOT EXISTS idx_valores_clientes_coluna ON valores_colunas_clientes(coluna_id);
+
+  -- Tabela de preços: contratos por cliente
+  CREATE TABLE IF NOT EXISTS precos (
+    id SERIAL PRIMARY KEY,
+    cliente_id INTEGER NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
+    numero_contrato TEXT,
+    valor_ticket NUMERIC(14, 2),
+    inicio_contrato TEXT,
+    vencimento_contrato TEXT,
+    atendimento TEXT,
+    criado_por INTEGER REFERENCES usuarios(id) ON DELETE SET NULL,
+    criado_em TIMESTAMPTZ NOT NULL DEFAULT now(),
+    atualizado_em TIMESTAMPTZ NOT NULL DEFAULT now()
+  );
+  CREATE INDEX IF NOT EXISTS idx_precos_cliente ON precos(cliente_id);
+
+  CREATE TABLE IF NOT EXISTS valores_colunas_precos (
+    preco_id INTEGER NOT NULL REFERENCES precos(id) ON DELETE CASCADE,
+    coluna_id INTEGER NOT NULL REFERENCES colunas(id) ON DELETE CASCADE,
+    valor TEXT,
+    PRIMARY KEY (preco_id, coluna_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_valores_precos_coluna ON valores_colunas_precos(coluna_id);
+
+  -- Layout e regras dos campos de cada tela: ordem e visibilidade na tabela, obrigatoriedade no formulário
+  CREATE TABLE IF NOT EXISTS layout_campos (
+    entidade TEXT NOT NULL,
+    chave TEXT NOT NULL,
+    ordem INTEGER NOT NULL,
+    visivel BOOLEAN NOT NULL DEFAULT true,
+    obrigatorio BOOLEAN NOT NULL DEFAULT false,
+    PRIMARY KEY (entidade, chave)
+  );
 `;
 
 let preparo = null;

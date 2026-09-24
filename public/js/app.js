@@ -5,13 +5,17 @@ import { get, post, estado, ehAdmin, carregarApoio, definirAoExpirarSessao } fro
 import { renderPainel } from './painel.js';
 import { renderClientes, renderCliente } from './clientes.js';
 import { renderUsuarios } from './usuarios.js';
+import { renderPrecos } from './precos.js';
+import { renderLayoutCampos } from './layoutCampos.js';
+
+const NOME_SISTEMA = 'Gestor Legal Oper';
 
 const app = document.getElementById('app');
 
 function marca(clara = false) {
   return el('div', { class: `marca${clara ? ' marca-clara' : ''}` },
     el('span', { class: 'marca-simbolo', 'aria-hidden': 'true' }, el('span'), el('span')),
-    el('span', { class: 'marca-nome' }, el('strong', { text: 'Gestão' }), el('span', { text: 'de demandas' })));
+    el('span', { class: 'marca-nome' }, el('strong', { text: 'Gestor' }), el('span', { text: 'Legal Oper' })));
 }
 
 // ---------- Acesso ----------
@@ -138,10 +142,15 @@ function montarLayout() {
   const itens = [
     { rota: 'demandas', rotulo: 'Demandas', icone: 'demandas' },
     { rota: 'clientes', rotulo: 'Clientes', icone: 'clientes' },
-    ...(ehAdmin() ? [{ rota: 'usuarios', rotulo: 'Usuários', icone: 'usuarios' }] : []),
+    ...(ehAdmin() ? [
+      { rota: 'precos', rotulo: 'Tabela de Preços', curto: 'Preços', icone: 'preco' },
+      { rota: 'layout', rotulo: 'Layout | Regras Campos', curto: 'Layout', icone: 'layout' },
+      { rota: 'usuarios', rotulo: 'Usuários', icone: 'usuarios' },
+    ] : []),
   ];
-  navLinks = itens.map((i) => el('a', { href: `#/${i.rota}`, class: 'nav-link', dataset: { rota: i.rota } },
-    icone(i.icone, 20), el('span', { text: i.rotulo })));
+  navLinks = itens.map((i) => el('a', { href: `#/${i.rota}`, class: 'nav-link', dataset: { rota: i.rota }, 'aria-label': i.curto ? i.rotulo : undefined },
+    icone(i.icone, 20), el('span', { class: i.curto ? 'nav-rotulo' : '', text: i.rotulo }),
+    i.curto ? el('span', { class: 'nav-rotulo-curto', 'aria-hidden': 'true', text: i.curto }) : null));
   conteudo = el('main', { class: 'conteudo', id: 'conteudo', tabindex: '-1' });
   const iniciais = estado.usuario.nome.split(/\s+/).slice(0, 2).map((p) => p[0]).join('').toUpperCase();
 
@@ -173,17 +182,23 @@ function rotear() {
   window.scrollTo(0, 0);
   if (rota === 'clientes' && partes[1]) {
     renderCliente(conteudo, Number(partes[1]));
-    document.title = 'Cliente | Gestão de Demandas';
+    document.title = `Cliente | ${NOME_SISTEMA}`;
   } else if (rota === 'clientes') {
     renderClientes(conteudo);
-    document.title = 'Clientes | Gestão de Demandas';
+    document.title = `Clientes | ${NOME_SISTEMA}`;
+  } else if (rota === 'precos' && ehAdmin()) {
+    renderPrecos(conteudo);
+    document.title = `Tabela de Preços | ${NOME_SISTEMA}`;
+  } else if (rota === 'layout' && ehAdmin()) {
+    renderLayoutCampos(conteudo);
+    document.title = `Layout | Regras Campos | ${NOME_SISTEMA}`;
   } else if (rota === 'usuarios' && ehAdmin()) {
     renderUsuarios(conteudo);
-    document.title = 'Usuários | Gestão de Demandas';
+    document.title = `Usuários | ${NOME_SISTEMA}`;
   } else {
     if (rota !== 'demandas') { history.replaceState(null, '', '#/demandas'); rotear(); return; }
     renderPainel(conteudo);
-    document.title = 'Demandas | Gestão de Demandas';
+    document.title = `Demandas | ${NOME_SISTEMA}`;
   }
 }
 

@@ -5,10 +5,11 @@ const { db, transacao } = require('../db');
 const { filtroClientes, podeAcessarCliente, ehAdmin } = require('../auth');
 const { Validador, naoEncontrado, idParam, hoje, termoLike, validarValorColuna } = require('../validacao');
 const { listarColunas } = require('./colunas');
+const { montarLayout, aplicarObrigatorios } = require('../layout');
 
 const r = express.Router();
 
-async function validarCliente(body) {
+async function validarCliente(body, modo = 'criar') {
   const v = new Validador(body)
     .texto('nome', 'o nome do cliente', { obrigatorio: true, min: 2, max: 150 })
     .texto('documento', 'o CPF/CNPJ', { max: 20 })
@@ -32,6 +33,7 @@ async function validarCliente(body) {
     if (res.erro) v.erro(`campo_${col.id}`, `${col.nome}: ${res.erro}`);
     else campos[col.id] = res.valor;
   }
+  aplicarObrigatorios(v, await montarLayout('cliente'), campos, modo);
   const d = v.verificar();
   d.campos = campos;
   return d;
@@ -132,7 +134,7 @@ r.post('/', async (req, res) => {
 r.put('/:id', async (req, res) => {
   const id = idParam(req.params.id);
   await carregarAcessivel(req.usuario, id);
-  const d = await validarCliente(req.body);
+  const d = await validarCliente(req.body, 'atualizar');
   await transacao(async (t) => {
     await t.exec(`UPDATE clientes SET nome = ?, documento = ?, email = ?, telefone = ?, observacoes = ?,
       atualizado_em = now() WHERE id = ?`, [d.nome, d.documento, d.email, d.telefone, d.observacoes, id]);

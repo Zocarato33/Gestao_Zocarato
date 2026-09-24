@@ -515,3 +515,47 @@ th.col-extra { white-space: nowrap; }
   .cabecalho-acoes.acoes-tres { grid-auto-flow: row; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .cabecalho-acoes.acoes-tres > .botao-primario { grid-column: 1 / -1; order: -1; }
 }
+
+/* Tabela de preços */
+.prazo-situacao.atencao { color: #9A6700; font-weight: 600; }
+.tabela-precos td .prazo-situacao { display: block; padding-left: 0; }
+@media (max-width: 760px) {
+  .filtros.filtros-fixos { display: grid; grid-template-columns: 1fr; }
+  .filtros-fixos .filtro { max-width: none; }
+}
+
+/* Layout | Regras Campos */
+.abas { display: flex; gap: 4px; border-bottom: 1px solid var(--linha); margin-bottom: 14px; overflow-x: auto; }
+.aba {
+  background: none; border: 0; border-bottom: 3px solid transparent; padding: 10px 14px; font: inherit; font-weight: 600;
+  font-size: 14px; color: var(--chumbo); cursor: pointer; white-space: nowrap; margin-bottom: -1px;
+}
+.aba:hover { color: var(--verde); }
+.aba.ativa { color: var(--verde); border-bottom-color: var(--ciano-escuro); }
+.layout-corpo { display: flex; flex-direction: column; gap: 14px; }
+.layout-corpo .painel-cartao > .meta { margin: -4px 0 12px; }
+.tabela-layout .col-ordem { width: 132px; }
+.tabela-layout .centro, .tabela-layout th.centro { text-align: center; width: 150px; }
+.ordem-controles { display: flex; align-items: center; gap: 4px; }
+.ordem-numero { display: inline-block; min-width: 26px; font-weight: 600; color: var(--chumbo); }
+.ordem-controles .botao-icone:disabled { opacity: .3; cursor: default; }
+.checagem-celula { justify-content: center; padding: 0; }
+.checagem-celula input:disabled { opacity: .45; cursor: not-allowed; }
+.barra-salvar {
+  position: sticky; bottom: 0; display: flex; justify-content: flex-end; align-items: center; gap: 10px;
+  padding: 12px 0; margin-top: 14px; background: linear-gradient(to bottom, rgba(236,239,243,0), var(--off) 30%);
+}
+.aviso-alteracoes { color: #9A6700; font-weight: 600; font-size: 13.5px; margin-right: auto; }
+@media (max-width: 760px) {
+  .tabela-layout .centro { text-align: left; width: auto; }
+  .checagem-celula { justify-content: flex-start; }
+  .barra-salvar { bottom: 64px; }
+}
+
+/* Rótulos curtos no menu inferior do celular */
+.nav-rotulo-curto { display: none; }
+@media (max-width: 900px) {
+  .nav-rotulo { display: none; }
+  .nav-rotulo-curto { display: inline; }
+  .nav-link { min-width: 0; }
+}

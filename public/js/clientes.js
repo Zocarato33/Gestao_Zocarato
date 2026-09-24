@@ -3,7 +3,9 @@ import {
   tratarErroFormulario, debounce, vazio, chipStatus, chipPrioridade, descreverPrazo, dataBr, dataHoraBr, numeroBr,
   guardar, recuperar, STATUS,
 } from './ui.js';
-import { get, post, put, del, estado, recarregarClientes, ehAdmin } from './api.js';
+import {
+  get, post, put, del, estado, recarregarClientes, ehAdmin, colunasTabela, obrigatorio, colunasOrdenadas,
+} from './api.js';
 import { abrirFormDemanda, controleColuna } from './demandaForm.js';
 import { abrirGerenciadorColunas } from './colunas.js';
 
@@ -50,7 +52,7 @@ export function abrirFormCliente(cliente, aoSalvar) {
   function renderExtras() {
     const digitados = new Map(extras.map(({ col, controle }) => [col.id, controle.value]));
     const valores = cliente?.campos || {};
-    extras = estado.colunasClientes.map((col) => ({
+    extras = colunasOrdenadas('cliente').map((col) => ({
       col,
       controle: controleColuna(col, digitados.has(col.id) ? digitados.get(col.id) : valores[col.id]),
     }));
@@ -59,7 +61,9 @@ export function abrirFormCliente(cliente, aoSalvar) {
       el('legend', { text: 'Campos adicionais' }),
       extras.length
         ? el('div', { class: 'grade grade-2' },
-          extras.map(({ col, controle }) => campo(col.nome, controle, { nome: `campo_${col.id}` })))
+          extras.map(({ col, controle }) => campo(col.nome, controle, {
+            nome: `campo_${col.id}`, obrigatorio: obrigatorio('cliente', `extra_${col.id}`),
+          })))
         : el('p', { class: 'meta', text: 'Nenhum campo adicional ainda. Crie colunas para registrar outras informações dos clientes.' }),
       ehAdmin()
         ? el('div', { class: 'acoes-extra' },
@@ -75,10 +79,10 @@ export function abrirFormCliente(cliente, aoSalvar) {
   const form = el('form', { class: 'formulario', novalidate: true, id: `fcli-${Date.now()}` },
     el('div', { class: 'grade grade-2' },
       campo('Nome ou razão social', nome, { nome: 'nome', obrigatorio: true, classe: 'coluna-inteira' }),
-      campo('CPF ou CNPJ', documento, { nome: 'documento' }),
-      campo('Telefone', telefone, { nome: 'telefone' }),
-      campo('E-mail', email, { nome: 'email', classe: 'coluna-inteira' }),
-      campo('Observações', observacoes, { nome: 'observacoes', classe: 'coluna-inteira' })),
+      campo('CPF ou CNPJ', documento, { nome: 'documento', obrigatorio: obrigatorio('cliente', 'documento') }),
+      campo('Telefone', telefone, { nome: 'telefone', obrigatorio: obrigatorio('cliente', 'telefone') }),
+      campo('E-mail', email, { nome: 'email', classe: 'coluna-inteira', obrigatorio: obrigatorio('cliente', 'email') }),
+      campo('Observações', observacoes, { nome: 'observacoes', classe: 'coluna-inteira', obrigatorio: obrigatorio('cliente', 'observacoes') })),
     grupoExtra);
   const salvar = el('button', { type: 'submit', class: 'botao botao-primario', form: form.id, text: cliente ? 'Salvar alterações' : 'Cadastrar cliente' });
   m.corpo.append(form);
@@ -140,13 +144,14 @@ export async function excluirCliente(cliente, total) {
 
 const CHAVE_OCULTAS = 'gd:clientes:ocultas:v1';
 
-// Colunas padrão que podem ser ocultadas (o nome do cliente fica sempre visível)
-const COLUNAS_PADRAO = [
-  { chave: 'contato', rotulo: 'Contato' },
-  { chave: 'total', rotulo: 'Demandas', num: true },
-  { chave: 'abertas', rotulo: 'Em aberto', num: true },
-  { chave: 'vencidas', rotulo: 'Vencidas', num: true },
-];
+// Títulos curtos das colunas padrão na tabela
+const CABECALHOS = {
+  nome: { rotulo: 'Cliente' },
+  contato: { rotulo: 'Contato' },
+  total: { rotulo: 'Demandas', num: true },
+  abertas: { rotulo: 'Em aberto', num: true },
+  vencidas: { rotulo: 'Vencidas', num: true },
+};
 
 export function renderClientes(raiz) {
   let termo = '';
@@ -157,11 +162,12 @@ export function renderClientes(raiz) {
   const area = el('div', { class: 'tabela-area' });
   const contagem = el('p', { class: 'contagem' });
 
-  const colunasDisponiveis = () => [
-    ...COLUNAS_PADRAO,
-    ...estado.colunasClientes.map((col) => ({ chave: `extra_${col.id}`, rotulo: col.nome, col })),
-  ];
-  const visiveis = () => colunasDisponiveis().filter((c) => !ocultas.has(c.chave));
+  // Colunas liberadas no layout (Layout | Regras Campos), na ordem configurada.
+  // Cada pessoa ainda pode ocultar as que não quiser ver pelo menu "Exibir colunas".
+  const colunasDisponiveis = () => colunasTabela('cliente').map((item) => (item.origem === 'personalizado'
+    ? { chave: item.chave, rotulo: item.rotulo, col: estado.colunasClientes.find((x) => x.id === item.coluna.id) || item.coluna, fixa: false }
+    : { chave: item.chave, ...(CABECALHOS[item.chave] || { rotulo: item.rotulo }), fixa: !item.podeOcultar }));
+  const visiveis = () => colunasDisponiveis().filter((c) => c.fixa || !ocultas.has(c.chave));
 
   // Menu "Exibir colunas"
   const menuExibir = el('div', { class: 'menu menu-exibir', hidden: true, role: 'group', 'aria-label': 'Colunas visíveis' });
@@ -187,8 +193,8 @@ export function renderClientes(raiz) {
   function renderMenuExibir() {
     limpar(menuExibir).append(...[
       el('p', { class: 'menu-titulo', text: 'Colunas visíveis' }),
-      el('label', { class: 'checagem' }, el('input', { type: 'checkbox', checked: true, disabled: true }), 'Cliente'),
       ...colunasDisponiveis().map((c) => {
+        if (c.fixa) return el('label', { class: 'checagem' }, el('input', { type: 'checkbox', checked: true, disabled: true }), c.rotulo);
         const caixa = el('input', { type: 'checkbox', checked: !ocultas.has(c.chave) });
         caixa.addEventListener('change', () => {
           if (caixa.checked) ocultas.delete(c.chave); else ocultas.add(c.chave);
@@ -226,6 +232,10 @@ export function renderClientes(raiz) {
 
   function celulaPadrao(chave, c) {
     switch (chave) {
+      case 'nome':
+        return el('td', { class: 'col-nome', dataset: { rotulo: 'Cliente' } },
+          el('a', { href: `#/clientes/${c.id}`, class: 'link-forte', text: c.nome }),
+          c.documento ? el('small', { class: 'celula-sub', text: c.documento }) : null);
       case 'contato':
         return el('td', { dataset: { rotulo: 'Contato' } },
           el('span', { text: c.email || '' }), c.telefone ? el('small', { class: 'celula-sub', text: c.telefone }) : null,
@@ -254,9 +264,6 @@ export function renderClientes(raiz) {
     const cols = visiveis();
     const tbody = el('tbody', {}, lista.map((c) => {
       const tr = el('tr', { class: 'linha-clicavel' },
-        el('td', { class: 'col-nome', dataset: { rotulo: 'Cliente' } },
-          el('a', { href: `#/clientes/${c.id}`, class: 'link-forte', text: c.nome }),
-          c.documento ? el('small', { class: 'celula-sub', text: c.documento }) : null),
         cols.map((k) => (k.col
           ? el('td', { class: `col-extra${k.col.tipo === 'numero' ? ' num' : ''}`, dataset: { rotulo: k.rotulo }, text: valorLegivel(k.col, c.campos?.[k.col.id]) })
           : celulaPadrao(k.chave, c))),
@@ -275,7 +282,6 @@ export function renderClientes(raiz) {
     }));
     area.append(el('div', { class: 'tabela-rolagem' }, el('table', { class: 'tabela tabela-clientes' },
       el('thead', {}, el('tr', {},
-        el('th', { scope: 'col', text: 'Cliente' }),
         cols.map((k) => el('th', { scope: 'col', class: k.col ? `col-extra${k.col.tipo === 'numero' ? ' num' : ''}` : (k.num ? 'num' : ''), text: k.rotulo })),
         el('th', { scope: 'col', class: 'col-acoes' }, el('span', { class: 'sr', text: 'Ações' })))),
       tbody)));
@@ -320,7 +326,7 @@ export async function renderCliente(raiz, id) {
   const dados = el('dl', { class: 'dados-cliente' },
     ...[['CPF/CNPJ', c.documento], ['E-mail', c.email], ['Telefone', c.telefone], ['Cadastrado em', dataHoraBr(c.criado_em)]]
       .map(([k, v]) => el('div', {}, el('dt', { text: k }), el('dd', { text: v || 'Não informado' }))),
-    ...estado.colunasClientes.map((col) => el('div', {},
+    ...colunasOrdenadas('cliente').map((col) => el('div', {},
       el('dt', { text: col.nome }), el('dd', { text: valorLegivel(col, c.campos?.[col.id]) || 'Não informado' }))),
     c.observacoes ? el('div', { class: 'coluna-inteira' }, el('dt', { text: 'Observações' }), el('dd', { class: 'pre', text: c.observacoes })) : null,
     c.usuariosComAcesso ? el('div', { class: 'coluna-inteira' }, el('dt', { text: 'Usuários com acesso (além dos administradores)' }),

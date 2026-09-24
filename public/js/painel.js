@@ -2,7 +2,7 @@ import {
   el, icone, limpar, opcoesSelect, debounce, sucesso, erro, confirmar, descreverPrazo, vazio,
   guardar, recuperar, STATUS, PRIORIDADES,
 } from './ui.js';
-import { get, patch, del, consulta, estado, ehAdmin } from './api.js';
+import { get, patch, del, consulta, estado, ehAdmin, colunasTabela } from './api.js';
 import { abrirFormDemanda, controleColuna, preencherResponsaveis } from './demandaForm.js';
 import { abrirGerenciadorColunas, abrirEdicaoColuna, excluirColuna } from './colunas.js';
 
@@ -146,7 +146,16 @@ export function renderPainel(raiz) {
   // ---------- Tabela ----------
   function cabecalho() {
     const tr = el('tr');
-    for (const c of COLUNAS_FIXAS) {
+    for (const item of colunasTabela('demanda')) {
+      if (item.origem === 'personalizado') {
+        const col = estado.colunas.find((x) => x.id === item.coluna.id) || item.coluna;
+        const th = el('th', { scope: 'col', class: 'col-extra' }, el('span', { text: col.nome }));
+        if (ehAdmin()) th.append(menuColuna(col));
+        tr.append(th);
+        continue;
+      }
+      const c = COLUNAS_FIXAS.find((x) => x.chave === item.chave);
+      if (!c) continue;
       if (!c.ordenavel) {
         tr.append(el('th', { scope: 'col', class: `col-${c.chave}`, text: c.rotulo }));
         continue;
@@ -163,11 +172,6 @@ export function renderPainel(raiz) {
         scope: 'col', class: `col-${c.chave}`,
         'aria-sort': ativo ? (filtros.direcao === 'asc' ? 'ascending' : 'descending') : 'none',
       }, btn));
-    }
-    for (const col of estado.colunas) {
-      const th = el('th', { scope: 'col', class: 'col-extra' }, el('span', { text: col.nome }));
-      if (ehAdmin()) th.append(menuColuna(col));
-      tr.append(th);
     }
     tr.append(el('th', { scope: 'col', class: 'col-acoes' }, el('span', { class: 'sr', text: 'Ações' })));
     return el('thead', {}, tr);
@@ -238,17 +242,23 @@ export function renderPainel(raiz) {
       text: descreverPrazo(d.prazo, dados.hoje, d.status === 'concluida'),
     });
 
-    tr.append(
-      celula('Nº', el('button', { type: 'button', class: 'link-id', text: `#${d.id}`, title: 'Abrir demanda', onClick: () => abrir(d.id) }), 'col-id'),
-      celula('Título', el('div', { class: 'titulo-wrap' }, titulo, el('small', { class: 'celula-sub', text: d.cliente_nome })), 'col-titulo'),
-      celula('Cliente', cliente, 'col-cliente'),
-      celula('Responsável', resp, 'col-responsavel'),
-      celula('Status', status, 'col-status'),
-      celula('Prioridade', prioridade, 'col-prioridade'),
-      celula('Prazo', el('div', { class: 'prazo-wrap' }, prazo, situacao), 'col-prazo'),
-    );
+    // Células padrão; a ordem e quais aparecem vêm do layout configurado
+    const fixas = {
+      id: () => celula('Nº', el('button', { type: 'button', class: 'link-id', text: `#${d.id}`, title: 'Abrir demanda', onClick: () => abrir(d.id) }), 'col-id'),
+      titulo: () => celula('Título', el('div', { class: 'titulo-wrap' }, titulo, el('small', { class: 'celula-sub', text: d.cliente_nome })), 'col-titulo'),
+      cliente: () => celula('Cliente', cliente, 'col-cliente'),
+      responsavel: () => celula('Responsável', resp, 'col-responsavel'),
+      status: () => celula('Status', status, 'col-status'),
+      prioridade: () => celula('Prioridade', prioridade, 'col-prioridade'),
+      prazo: () => celula('Prazo', el('div', { class: 'prazo-wrap' }, prazo, situacao), 'col-prazo'),
+    };
 
-    for (const col of estado.colunas) {
+    for (const item of colunasTabela('demanda')) {
+      if (item.origem !== 'personalizado') {
+        if (fixas[item.chave]) tr.append(fixas[item.chave]());
+        continue;
+      }
+      const col = estado.colunas.find((x) => x.id === item.coluna.id) || item.coluna;
       const controle = controleColuna(col, d.campos[col.id], { class: 'celula-input', 'aria-label': col.nome });
       if (controle.tagName === 'INPUT' && controle.type === 'text') {
         controle.addEventListener('keydown', (e) => { if (e.key === 'Enter') controle.blur(); });

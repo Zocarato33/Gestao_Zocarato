@@ -8,7 +8,9 @@ import { post, put, del, colunasDe, recarregarColunas } from './api.js';
 const TEXTOS = {
   demanda: { plural: 'demandas', item: 'demanda(s)', subtitulo: 'Crie campos próprios para registrar informações em cada demanda.' },
   cliente: { plural: 'clientes', item: 'cliente(s)', subtitulo: 'Crie campos próprios para registrar informações em cada cliente.' },
+  preco: { plural: 'registros da tabela de preços', item: 'registro(s)', subtitulo: 'Crie campos próprios para registrar informações de cada contrato.' },
 };
+const TITULOS = { demanda: 'Colunas de demandas', cliente: 'Colunas de clientes', preco: 'Colunas da tabela de preços' };
 const textos = (entidade) => TEXTOS[entidade] || TEXTOS.demanda;
 
 /** Confirma e exclui uma coluna. Retorna true se excluiu. */
@@ -84,7 +86,7 @@ export function abrirEdicaoColuna(col, aoMudar) {
 export function abrirGerenciadorColunas(aoMudar, entidade = 'demanda') {
   let mudou = false;
   const m = abrirModal({
-    titulo: entidade === 'cliente' ? 'Colunas de clientes' : 'Colunas da tabela',
+    titulo: TITULOS[entidade] || TITULOS.demanda,
     subtitulo: textos(entidade).subtitulo,
     largura: 'media',
     onFechar: () => { if (mudou && aoMudar) aoMudar(); },
@@ -122,7 +124,8 @@ export function abrirGerenciadorColunas(aoMudar, entidade = 'demanda') {
   }
 
   const nome = el('input', {
-    type: 'text', maxlength: 40, required: true, placeholder: entidade === 'cliente' ? 'Ex.: Segmento' : 'Ex.: Valor da causa',
+    type: 'text', maxlength: 40, required: true,
+    placeholder: { cliente: 'Ex.: Segmento', preco: 'Ex.: Índice de reajuste' }[entidade] || 'Ex.: Valor da causa',
   });
   const tipo = el('select', {}, opcoesSelect(TIPOS_COLUNA, 'texto'));
   const opcoes = el('textarea', { rows: 4, placeholder: 'Uma opção por linha' });
