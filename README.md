@@ -192,7 +192,7 @@ O sistema fica disponível em http://localhost:3000 e o banco é guardado no vol
 Criar administrador pelo terminal dentro do contêiner:
 
 ```bash
-docker compose exec gestao-demandas node --disable-warning=ExperimentalWarning scripts/criar-admin.js
+docker compose exec -u node gestao-demandas node --disable-warning=ExperimentalWarning scripts/criar-admin.js
 ```
 
 Backup do banco a partir do contêiner:
@@ -202,6 +202,30 @@ docker compose cp gestao-demandas:/app/data/gestao.db ./backup.db
 ```
 
 ## 9. Colocando em produção
+
+O sistema precisa de um servidor que fique ligado o tempo todo e de um disco persistente para o arquivo do banco. Por isso **não funciona na Vercel** nem em outras plataformas serverless: lá o disco é temporário e os dados se perderiam. O arquivo `vercel.json` desativa os deploys automáticos da Vercel para evitar publicar uma versão quebrada.
+
+O repositório já vem pronto para duas plataformas que atendem esses requisitos. Nas duas, o HTTPS é automático.
+
+> **Importante:** logo após o primeiro deploy, abra o endereço publicado e crie o administrador na tela **Primeiro acesso**. Enquanto isso não for feito, qualquer pessoa que acessar o endereço pode criar o administrador.
+
+### Railway
+
+1. Em https://railway.com, crie um projeto com **Deploy from GitHub repo** e escolha este repositório. O arquivo `railway.json` já configura o build pelo `Dockerfile` e a verificação de saúde.
+2. No serviço criado, adicione um **Volume** com o caminho de montagem `/app/data`.
+3. Em **Variables**, cadastre `COOKIE_SECURE=true` e `TRUST_PROXY=true`.
+4. Em **Settings > Networking**, clique em **Generate Domain** para obter o endereço público.
+
+Volumes exigem o plano pago (Hobby). Cada push na `main` gera um novo deploy automaticamente.
+
+### Render
+
+1. Em https://render.com, escolha **New > Blueprint** e selecione este repositório. O arquivo `render.yaml` cria o serviço com Docker, o disco persistente de 1 GB em `/app/data` e as variáveis de ambiente.
+2. Confirme a criação. O endereço público aparece no painel do serviço.
+
+O disco persistente exige o plano pago (Starter). Cada push na `main` gera um novo deploy automaticamente.
+
+### Servidor próprio
 
 1. **Use HTTPS.** Coloque o sistema atrás de um proxy reverso (Nginx, Caddy, IIS ou o balanceador da sua nuvem) com certificado válido, e configure `COOKIE_SECURE=true` e `TRUST_PROXY=true`.
 2. **Mantenha o processo ativo.** Use Docker (`restart: unless-stopped` já está configurado), systemd, PM2 ou o serviço equivalente do seu servidor.
@@ -268,7 +292,11 @@ Gestao_Zocarato/
 ├── data/                   Banco de dados (criado automaticamente)
 ├── .env.example
 ├── Dockerfile
-└── docker-compose.yml
+├── docker-entrypoint.sh    Ajusta a permissão do volume e inicia o sistema
+├── docker-compose.yml
+├── railway.json            Deploy na Railway
+├── render.yaml             Deploy na Render
+└── vercel.json             Desativa deploys automáticos da Vercel
 ```
 
 ## 12. API
