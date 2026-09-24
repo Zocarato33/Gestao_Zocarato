@@ -76,8 +76,8 @@ As configurações ficam no arquivo `.env` na raiz do projeto. Na Vercel e na Re
 | `PORT` | `3000` | Porta HTTP do servidor |
 | `APP_TZ` | `America/Sao_Paulo` | Fuso horário usado para calcular prazos vencidos |
 | `SESSAO_HORAS` | `12` | Tempo de inatividade até a sessão expirar |
-| `COOKIE_SECURE` | `false` | Use `true` quando o sistema estiver atrás de HTTPS |
-| `TRUST_PROXY` | `false` | Use `true` se houver proxy reverso (Vercel, Render, Nginx, Caddy, IIS) |
+| `COOKIE_SECURE` | `false` (`true` na Vercel e na Render) | Use `true` quando o sistema estiver atrás de HTTPS |
+| `TRUST_PROXY` | `false` (`true` na Vercel e na Render) | Use `true` se houver proxy reverso (Nginx, Caddy, IIS) |
 | `DB_POOL_MAX` | `5` | Máximo de conexões simultâneas abertas com o banco |
 
 ## 4. Banco de dados
@@ -225,13 +225,10 @@ Não é preciso criar tabelas: o sistema faz isso sozinho no primeiro acesso.
 ### 2. Sistema na Vercel
 
 1. Em https://vercel.com, importe este repositório (**Add New > Project**). A Vercel reconhece o Express sozinha: o `src/server.js` vira uma função e a pasta `public/` é servida pelo CDN.
-2. Em **Settings > Environment Variables**, cadastre:
-   - `DATABASE_URL` com a connection string do Neon
-   - `COOKIE_SECURE` = `true`
-   - `TRUST_PROXY` = `true`
+2. Conecte o banco: a forma mais simples é a integração do Neon no Marketplace da Vercel (**Storage > Neon**), que cria o banco e cadastra a `DATABASE_URL` automaticamente. Se o banco foi criado direto no Neon, cadastre a `DATABASE_URL` em **Settings > Environment Variables**.
 3. Faça um novo deploy (**Deployments > Redeploy**) para aplicar as variáveis.
 
-Alternativa: a integração do Neon no Marketplace da Vercel (**Storage > Neon**) cria o banco e cadastra a `DATABASE_URL` automaticamente.
+Na Vercel e na Render, `COOKIE_SECURE` e `TRUST_PROXY` já ficam ativas sem configuração.
 
 O plano gratuito (Hobby) da Vercel é para uso não comercial. Para uso pela empresa, avalie o plano Pro ou a opção da Render abaixo.
 

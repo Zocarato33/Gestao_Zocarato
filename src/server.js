@@ -4,13 +4,13 @@ const path = require('node:path');
 const express = require('express');
 const { prontoParaUso, descricaoBanco } = require('./db');
 const { lerCookies, carregarUsuario, exigirLogin } = require('./auth');
-const { ErroHttp } = require('./validacao');
+const { ErroHttp, EM_PLATAFORMA, envBool } = require('./validacao');
 
 const app = express();
 const PORT = Number(process.env.PORT) || 3000;
 
 app.disable('x-powered-by');
-if (String(process.env.TRUST_PROXY).toLowerCase() === 'true') app.set('trust proxy', 1);
+if (envBool('TRUST_PROXY', EM_PLATAFORMA)) app.set('trust proxy', 1);
 
 // Cabeçalhos de segurança
 app.use((_req, res, next) => {

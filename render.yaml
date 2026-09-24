@@ -7,10 +7,6 @@ services:
     envVars:
       - key: DATABASE_URL
         sync: false
-      - key: COOKIE_SECURE
-        value: "true"
-      - key: TRUST_PROXY
-        value: "true"
       - key: APP_TZ
         value: America/Sao_Paulo
       - key: SESSAO_HORAS

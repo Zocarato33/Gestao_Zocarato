@@ -2,11 +2,11 @@
 
 const crypto = require('node:crypto');
 const { db } = require('./db');
-const { ErroHttp, proibido } = require('./validacao');
+const { ErroHttp, proibido, EM_PLATAFORMA, envBool } = require('./validacao');
 
 const COOKIE = 'gd_sessao';
 const SESSAO_MS = (Number(process.env.SESSAO_HORAS) || 12) * 60 * 60 * 1000;
-const COOKIE_SECURE = String(process.env.COOKIE_SECURE).toLowerCase() === 'true';
+const COOKIE_SECURE = envBool('COOKIE_SECURE', EM_PLATAFORMA);
 
 // ---------- Senhas (scrypt nativo do Node) ----------
 

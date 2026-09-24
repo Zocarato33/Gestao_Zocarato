@@ -6,7 +6,8 @@ const { Pool, types } = require('pg');
 types.setTypeParser(20, (v) => Number.parseInt(v, 10));
 types.setTypeParser(1700, (v) => Number.parseFloat(v));
 
-const DATABASE_URL = process.env.DATABASE_URL;
+// POSTGRES_URL é o nome usado por algumas integrações (por exemplo, Neon na Vercel)
+const DATABASE_URL = process.env.DATABASE_URL || process.env.POSTGRES_URL;
 if (!DATABASE_URL) {
   throw new Error('Defina a variável DATABASE_URL com a conexão do PostgreSQL (veja o arquivo .env.example).');
 }
