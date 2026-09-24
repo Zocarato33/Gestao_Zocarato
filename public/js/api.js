@@ -61,19 +61,22 @@ export const estado = {
   clientes: [],
   responsaveis: [],
   colunas: [],
+  colunasClientes: [],
 };
 
 export const ehAdmin = () => estado.usuario && estado.usuario.papel === 'admin';
 
 export async function carregarApoio() {
-  const [clientes, responsaveis, colunas] = await Promise.all([
+  const [clientes, responsaveis, colunas, colunasClientes] = await Promise.all([
     get('/api/clientes'),
     get('/api/usuarios/opcoes'),
     get('/api/colunas'),
+    get('/api/colunas?entidade=cliente'),
   ]);
   estado.clientes = clientes;
   estado.responsaveis = responsaveis;
   estado.colunas = colunas;
+  estado.colunasClientes = colunasClientes;
 }
 
 export async function recarregarClientes() {
@@ -82,8 +85,12 @@ export async function recarregarClientes() {
   estado.responsaveis = responsaveis;
 }
 
-export async function recarregarColunas() {
-  estado.colunas = await get('/api/colunas');
+/** Colunas personalizadas da tela informada ('demanda' ou 'cliente'), a partir do cache. */
+export const colunasDe = (entidade) => (entidade === 'cliente' ? estado.colunasClientes : estado.colunas);
+
+export async function recarregarColunas(entidade = 'demanda') {
+  if (entidade === 'cliente') estado.colunasClientes = await get('/api/colunas?entidade=cliente');
+  else estado.colunas = await get('/api/colunas');
 }
 
 /** Responsáveis que podem atender o cliente informado. */

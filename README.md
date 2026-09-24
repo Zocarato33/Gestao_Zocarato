@@ -96,8 +96,9 @@ As tabelas e índices são criados **automaticamente** na primeira execução, n
 | `clientes` | Cadastro de clientes |
 | `usuario_clientes` | Quais clientes cada usuário comum pode acessar |
 | `demandas` | Demandas com todos os campos padrão |
-| `colunas` | Definição das colunas personalizadas (nome, tipo e opções) |
+| `colunas` | Definição das colunas personalizadas (nome, tipo, opções e se pertencem a demandas ou a clientes) |
 | `valores_colunas` | Valores das colunas personalizadas em cada demanda |
+| `valores_colunas_clientes` | Valores das colunas personalizadas em cada cliente |
 
 Regras de integridade aplicadas pelo próprio banco:
 
@@ -175,7 +176,9 @@ A gestão de colunas é restrita a administradores porque excluir uma coluna apa
 
 ### Clientes
 
-- Lista com busca e contagem de demandas totais, em aberto e vencidas de cada cliente.
+- Lista com busca e contagem de demandas totais, em aberto e vencidas de cada cliente. A busca também procura nos campos adicionais.
+- **Exibir colunas:** escolha quais colunas aparecem na lista (o nome do cliente fica sempre visível). A escolha fica salva no navegador; colunas novas aparecem automaticamente, e **Mostrar todas** restaura o padrão.
+- **Colunas de clientes (administrador):** pelo botão **Colunas** da lista, ou por **Nova coluna** dentro do formulário de cliente, crie campos próprios (texto, número, data ou lista de opções), como segmento ou data de renovação do contrato. Eles aparecem em **Campos adicionais** no formulário, na página do cliente e como colunas na lista. Criar uma coluna pelo formulário não apaga o que já foi digitado. As colunas de clientes são independentes das colunas de demandas.
 - Ao abrir um cliente: dados cadastrais, resumo por status e lista das demandas com status, prioridade, prazo e responsável. É possível criar uma demanda já vinculada ao cliente.
 - CPF ou CNPJ é opcional, mas se preenchido precisa ter 11 ou 14 dígitos.
 
@@ -329,7 +332,7 @@ Todas as rotas ficam em `/api`, exigem sessão (exceto as de autenticação) e r
 | GET, PUT, DELETE | `/api/clientes/:id` | Consultar com demandas, editar e excluir |
 | GET, POST | `/api/demandas` | Listar com filtros e indicadores; criar |
 | GET, PUT, PATCH, DELETE | `/api/demandas/:id` | Consultar, editar completo, editar parcial e excluir |
-| GET, POST | `/api/colunas` | Listar e criar (criar exige administrador) |
+| GET, POST | `/api/colunas` | Listar e criar (criar exige administrador). Use `?entidade=cliente` na listagem e `"entidade": "cliente"` na criação para as colunas de clientes |
 | PUT, DELETE | `/api/colunas/:id` | Renomear e excluir (administrador) |
 | GET | `/api/usuarios/opcoes` | Pessoas que podem ser responsáveis |
 | GET, POST | `/api/usuarios` | Listar e cadastrar (administrador) |

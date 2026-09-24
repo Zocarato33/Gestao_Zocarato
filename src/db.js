@@ -138,7 +138,11 @@ const SCHEMA_SQL = `
     ordem INTEGER NOT NULL DEFAULT 0,
     criado_em TIMESTAMPTZ NOT NULL DEFAULT now()
   );
-  CREATE UNIQUE INDEX IF NOT EXISTS idx_colunas_nome ON colunas (lower(nome));
+  -- Colunas personalizadas servem a demandas ou a clientes; o nome é único dentro de cada uma
+  ALTER TABLE colunas ADD COLUMN IF NOT EXISTS entidade TEXT NOT NULL DEFAULT 'demanda'
+    CHECK (entidade IN ('demanda', 'cliente'));
+  DROP INDEX IF EXISTS idx_colunas_nome;
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_colunas_entidade_nome ON colunas (entidade, lower(nome));
 
   CREATE TABLE IF NOT EXISTS valores_colunas (
     demanda_id INTEGER NOT NULL REFERENCES demandas(id) ON DELETE CASCADE,
@@ -147,6 +151,14 @@ const SCHEMA_SQL = `
     PRIMARY KEY (demanda_id, coluna_id)
   );
   CREATE INDEX IF NOT EXISTS idx_valores_coluna ON valores_colunas(coluna_id);
+
+  CREATE TABLE IF NOT EXISTS valores_colunas_clientes (
+    cliente_id INTEGER NOT NULL REFERENCES clientes(id) ON DELETE CASCADE,
+    coluna_id INTEGER NOT NULL REFERENCES colunas(id) ON DELETE CASCADE,
+    valor TEXT,
+    PRIMARY KEY (cliente_id, coluna_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_valores_clientes_coluna ON valores_colunas_clientes(coluna_id);
 `;
 
 let preparo = null;
