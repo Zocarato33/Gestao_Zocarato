@@ -6,7 +6,7 @@
  * Uso direto:       npm run criar-admin -- "Nome Completo" email@empresa.com SenhaForte123
  */
 const readline = require('node:readline/promises');
-const { db } = require('../src/db');
+const { db, transacao, prontoParaUso, pool } = require('../src/db');
 const { gerarHashSenha, validarForcaSenha } = require('../src/auth');
 
 async function main() {
@@ -28,20 +28,25 @@ async function main() {
     console.error(erro);
     process.exit(1);
   }
-  const existente = db.prepare('SELECT id FROM usuarios WHERE email = ?').get(email);
+  await prontoParaUso();
+  const hash = gerarHashSenha(senha);
+  const existente = await db.get('SELECT id FROM usuarios WHERE lower(email) = ?', [email]);
   if (existente) {
-    db.prepare(`UPDATE usuarios SET nome = ?, senha_hash = ?, papel = 'admin', ativo = 1,
-      atualizado_em = datetime('now') WHERE id = ?`).run(nome, gerarHashSenha(senha), existente.id);
-    db.prepare('DELETE FROM sessoes WHERE usuario_id = ?').run(existente.id);
+    await transacao(async (t) => {
+      await t.exec(`UPDATE usuarios SET nome = ?, senha_hash = ?, papel = 'admin', ativo = 1,
+        atualizado_em = now() WHERE id = ?`, [nome, hash, existente.id]);
+      await t.exec('DELETE FROM sessoes WHERE usuario_id = ?', [existente.id]);
+    });
     console.log(`Usuário ${email} atualizado: agora é administrador ativo com a nova senha.`);
   } else {
-    db.prepare(`INSERT INTO usuarios (nome, email, senha_hash, papel) VALUES (?, ?, ?, 'admin')`)
-      .run(nome, email, gerarHashSenha(senha));
+    await db.exec(`INSERT INTO usuarios (nome, email, senha_hash, papel) VALUES (?, ?, ?, 'admin')`, [nome, email, hash]);
     console.log(`Administrador ${email} criado com sucesso.`);
   }
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+main()
+  .catch((e) => {
+    console.error(e.message || e);
+    process.exitCode = 1;
+  })
+  .finally(() => pool.end());

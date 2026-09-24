@@ -1,7 +1,7 @@
 'use strict';
 
 const express = require('express');
-const { db } = require('../db');
+const { db, transacao } = require('../db');
 const {
   gerarHashSenha, conferirSenha, HASH_FICTICIO, validarForcaSenha,
   criarSessao, encerrarSessao, exigirLogin,
@@ -11,31 +11,40 @@ const { Validador, ErroHttp, ErroValidacao } = require('../validacao');
 
 const r = express.Router();
 
-const totalUsuarios = () => db.prepare('SELECT COUNT(*) AS n FROM usuarios').get().n;
+const totalUsuarios = async () => (await db.get('SELECT COUNT(*) AS n FROM usuarios')).n;
 
-r.get('/status', (req, res) => {
-  res.json({ precisaConfigurar: totalUsuarios() === 0, usuario: req.usuario });
+r.get('/status', async (req, res) => {
+  res.json({ precisaConfigurar: (await totalUsuarios()) === 0, usuario: req.usuario });
 });
 
 // Primeiro acesso: cria o administrador inicial. Só funciona com o banco vazio.
-r.post('/configurar', (req, res) => {
-  if (totalUsuarios() > 0) throw new ErroHttp(409, 'O sistema já foi configurado. Entre com sua conta.');
+r.post('/configurar', async (req, res) => {
+  if ((await totalUsuarios()) > 0) throw new ErroHttp(409, 'O sistema já foi configurado. Entre com sua conta.');
   const v = new Validador(req.body)
     .texto('nome', 'o nome', { obrigatorio: true, max: 120 })
     .email('email', 'o e-mail', { obrigatorio: true });
   const erroSenha = validarForcaSenha(req.body.senha);
   if (erroSenha) v.erro('senha', erroSenha);
   const d = v.verificar();
-  const info = db.prepare(`INSERT INTO usuarios (nome, email, senha_hash, papel) VALUES (?, ?, ?, 'admin')`)
-    .run(d.nome, d.email, gerarHashSenha(req.body.senha));
-  criarSessao(res, Number(info.lastInsertRowid));
+  const hash = gerarHashSenha(req.body.senha);
+  // A trava garante que duas requisições simultâneas não criem dois administradores iniciais
+  const id = await transacao(async (t) => {
+    await t.exec('LOCK TABLE usuarios IN EXCLUSIVE MODE');
+    if ((await t.get('SELECT COUNT(*) AS n FROM usuarios')).n > 0) {
+      throw new ErroHttp(409, 'O sistema já foi configurado. Entre com sua conta.');
+    }
+    const novo = await t.get(`INSERT INTO usuarios (nome, email, senha_hash, papel) VALUES (?, ?, ?, 'admin') RETURNING id`,
+      [d.nome, d.email, hash]);
+    await criarSessao(res, novo.id, t);
+    return novo.id;
+  });
   res.status(201).json({
     mensagem: 'Administrador criado. Bem-vindo!',
-    usuario: { id: Number(info.lastInsertRowid), nome: d.nome, email: d.email, papel: 'admin' },
+    usuario: { id, nome: d.nome, email: d.email, papel: 'admin' },
   });
 });
 
-r.post('/login', (req, res) => {
+r.post('/login', async (req, res) => {
   const email = String(req.body.email || '').trim().toLowerCase();
   const senha = String(req.body.senha || '');
   if (!email || !senha) {
@@ -44,40 +53,42 @@ r.post('/login', (req, res) => {
       ...(senha ? {} : { senha: 'Informe a senha.' }),
     });
   }
-  verificarBloqueio(req, email);
-  const u = db.prepare('SELECT id, nome, email, papel, ativo, senha_hash FROM usuarios WHERE email = ?').get(email);
+  await verificarBloqueio(req, email);
+  const u = await db.get('SELECT id, nome, email, papel, ativo, senha_hash FROM usuarios WHERE lower(email) = ?', [email]);
   const confere = conferirSenha(senha, u ? u.senha_hash : HASH_FICTICIO);
   if (!u || !confere) {
-    registrarFalha(req, email);
+    await registrarFalha(req, email);
     throw new ErroHttp(401, 'E-mail ou senha incorretos.');
   }
   if (!u.ativo) throw new ErroHttp(403, 'Sua conta está desativada. Procure um administrador.');
-  limparFalhas(req, email);
-  criarSessao(res, u.id);
+  await limparFalhas(req, email);
+  await criarSessao(res, u.id);
   res.json({
     mensagem: `Olá, ${u.nome.split(' ')[0]}!`,
     usuario: { id: u.id, nome: u.nome, email: u.email, papel: u.papel },
   });
 });
 
-r.post('/logout', (req, res) => {
-  encerrarSessao(req, res);
+r.post('/logout', async (req, res) => {
+  await encerrarSessao(req, res);
   res.json({ mensagem: 'Você saiu do sistema.' });
 });
 
-r.post('/senha', exigirLogin, (req, res) => {
+r.post('/senha', exigirLogin, async (req, res) => {
   const { senhaAtual, novaSenha } = req.body;
-  const u = db.prepare('SELECT senha_hash FROM usuarios WHERE id = ?').get(req.usuario.id);
+  const u = await db.get('SELECT senha_hash FROM usuarios WHERE id = ?', [req.usuario.id]);
   if (!senhaAtual || !conferirSenha(String(senhaAtual), u.senha_hash)) {
     throw new ErroValidacao({ senhaAtual: 'Senha atual incorreta.' });
   }
   const erro = validarForcaSenha(novaSenha);
   if (erro) throw new ErroValidacao({ novaSenha: erro });
-  db.prepare(`UPDATE usuarios SET senha_hash = ?, atualizado_em = datetime('now') WHERE id = ?`)
-    .run(gerarHashSenha(novaSenha), req.usuario.id);
+  const hash = gerarHashSenha(novaSenha);
   // Encerra as outras sessões do usuário e mantém a atual
-  db.prepare('DELETE FROM sessoes WHERE usuario_id = ?').run(req.usuario.id);
-  criarSessao(res, req.usuario.id);
+  await transacao(async (t) => {
+    await t.exec('UPDATE usuarios SET senha_hash = ?, atualizado_em = now() WHERE id = ?', [hash, req.usuario.id]);
+    await t.exec('DELETE FROM sessoes WHERE usuario_id = ?', [req.usuario.id]);
+    await criarSessao(res, req.usuario.id, t);
+  });
   res.json({ mensagem: 'Senha alterada com sucesso.' });
 });
 

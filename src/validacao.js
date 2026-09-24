@@ -35,6 +35,16 @@ class ErroValidacao extends ErroHttp {
   }
 }
 
+/** Plataformas (Vercel, Render) que sempre ficam atrás de um proxy com HTTPS. */
+const EM_PLATAFORMA = Boolean(process.env.VERCEL || process.env.RENDER);
+
+/** Lê uma variável true/false; quando ausente, usa o padrão informado. */
+function envBool(nome, padrao) {
+  const v = process.env[nome];
+  if (v === undefined || v === '') return padrao;
+  return String(v).toLowerCase() === 'true';
+}
+
 const naoEncontrado = (o = 'Registro') => new ErroHttp(404, `${o} não encontrado.`);
 const proibido = () => new ErroHttp(403, 'Você não tem permissão para esta ação.');
 
@@ -195,6 +205,6 @@ function validarValorColuna(coluna, bruto) {
 
 module.exports = {
   STATUS, PRIORIDADES, TIPOS_COLUNA,
-  ErroHttp, ErroValidacao, naoEncontrado, proibido,
+  ErroHttp, ErroValidacao, naoEncontrado, proibido, EM_PLATAFORMA, envBool,
   Validador, idParam, hoje, somarDias, dataValida, termoLike, validarValorColuna,
 };

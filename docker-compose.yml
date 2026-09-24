@@ -7,13 +7,30 @@ services:
       - "3000:3000"
     environment:
       PORT: 3000
-      DB_PATH: /app/data/gestao.db
+      DATABASE_URL: postgres://postgres:postgres@db:5432/gestao
       APP_TZ: America/Sao_Paulo
       SESSAO_HORAS: 12
       COOKIE_SECURE: "false"
       TRUST_PROXY: "false"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: postgres:17-alpine
+    container_name: gestao-demandas-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: gestao
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
     volumes:
-      - dados:/app/data
+      - dados:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d gestao"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
 
 volumes:
   dados:

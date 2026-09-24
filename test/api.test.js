@@ -2,15 +2,15 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const os = require('node:os');
-const path = require('node:path');
-const fs = require('node:fs');
+const crypto = require('node:crypto');
 
-// Banco temporário isolado para os testes
-const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gd-teste-'));
-process.env.DB_PATH = path.join(dir, 'teste.db');
+// Os testes rodam num schema temporário do PostgreSQL, apagado ao final (os dados reais não são afetados)
+// Usa TEST_DATABASE_URL de propósito (e não DATABASE_URL) para nunca rodar os testes no banco de produção por engano
+process.env.DATABASE_URL = process.env.TEST_DATABASE_URL || 'postgres://postgres:teste@localhost:5432/gestao';
+process.env.DB_SCHEMA = `teste_${crypto.randomBytes(4).toString('hex')}`;
 
 const app = require('../src/server');
+const { pool } = require('../src/db');
 
 let servidor;
 let base;
@@ -45,9 +45,10 @@ test.before(async () => {
   base = `http://127.0.0.1:${servidor.address().port}`;
 });
 
-test.after(() => {
+test.after(async () => {
   servidor.close();
-  fs.rmSync(dir, { recursive: true, force: true });
+  await pool.query(`DROP SCHEMA IF EXISTS ${process.env.DB_SCHEMA} CASCADE`);
+  await pool.end();
 });
 
 test('primeiro acesso cria o administrador e bloqueia nova configuração', async () => {
@@ -292,4 +293,21 @@ test('busca trata % e _ como texto literal', async () => {
   assert.equal(r.dados.length, 0);
   r = await admin.req('GET', '/api/demandas?busca=diligence');
   assert.equal(r.dados.demandas.length, 1);
+});
+
+test('bloqueio de login após tentativas falhas fica registrado no banco', async () => {
+  const c = new Cliente();
+  for (let i = 0; i < 8; i++) {
+    assert.equal((await c.req('POST', '/api/auth/login', { email: 'alvo@teste.com', senha: 'errada1' })).status, 401);
+  }
+  const r = await c.req('POST', '/api/auth/login', { email: 'alvo@teste.com', senha: 'errada1' });
+  assert.equal(r.status, 429);
+  const { rows } = await pool.query('SELECT contagem, bloqueado_ate FROM tentativas_login WHERE chave LIKE $1', ['%|alvo@teste.com']);
+  assert.equal(rows[0].contagem, 8);
+  assert.ok(rows[0].bloqueado_ate > Date.now());
+});
+
+test('datas de criação são devolvidas em ISO 8601', async () => {
+  const r = await admin.req('GET', `/api/demandas/${ids.d3}`);
+  assert.match(r.dados.criado_em, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/);
 });

@@ -24,12 +24,12 @@ function validarCliente(body) {
   return v.verificar();
 }
 
-function carregarAcessivel(usuario, id) {
-  if (!podeAcessarCliente(usuario, id)) throw naoEncontrado('Cliente');
-  return db.prepare('SELECT * FROM clientes WHERE id = ?').get(id);
+async function carregarAcessivel(usuario, id) {
+  if (!(await podeAcessarCliente(usuario, id))) throw naoEncontrado('Cliente');
+  return db.get('SELECT * FROM clientes WHERE id = ?', [id]);
 }
 
-r.get('/', (req, res) => {
+r.get('/', async (req, res) => {
   const f = filtroClientes(req.usuario);
   const busca = String(req.query.busca || '').trim();
   const params = [hoje(), ...f.params];
@@ -42,30 +42,30 @@ r.get('/', (req, res) => {
     LEFT JOIN demandas d ON d.cliente_id = c.id
     WHERE ${f.sql}`;
   if (busca) {
-    sql += ` AND (c.nome LIKE ? ESCAPE '\\' OR c.documento LIKE ? ESCAPE '\\'
-      OR c.email LIKE ? ESCAPE '\\' OR c.telefone LIKE ? ESCAPE '\\')`;
+    sql += ` AND (c.nome ILIKE ? ESCAPE '\\' OR c.documento ILIKE ? ESCAPE '\\'
+      OR c.email ILIKE ? ESCAPE '\\' OR c.telefone ILIKE ? ESCAPE '\\')`;
     const termo = termoLike(busca);
     params.push(termo, termo, termo, termo);
   }
-  sql += ' GROUP BY c.id ORDER BY c.nome COLLATE NOCASE';
-  const lista = db.prepare(sql).all(...params);
+  sql += ' GROUP BY c.id ORDER BY lower(c.nome)';
+  const lista = await db.all(sql, params);
   res.json(lista.map((c) => ({ ...c, abertas: c.abertas || 0, vencidas: c.vencidas || 0 })));
 });
 
-r.get('/:id', (req, res) => {
+r.get('/:id', async (req, res) => {
   const id = idParam(req.params.id);
-  const cliente = carregarAcessivel(req.usuario, id);
+  const cliente = await carregarAcessivel(req.usuario, id);
   const h = hoje();
-  const demandas = db.prepare(`
+  const demandas = await db.all(`
     SELECT d.id, d.titulo, d.status, d.prioridade, d.prazo, d.atualizado_em,
       d.responsavel_id, u.nome AS responsavel_nome,
       CASE WHEN d.status <> 'concluida' AND d.prazo IS NOT NULL AND d.prazo < ? THEN 1 ELSE 0 END AS vencida
     FROM demandas d LEFT JOIN usuarios u ON u.id = d.responsavel_id
     WHERE d.cliente_id = ?
-    ORDER BY CASE d.status WHEN 'concluida' THEN 1 ELSE 0 END, d.prazo IS NULL, d.prazo, d.id DESC`).all(h, id);
+    ORDER BY CASE d.status WHEN 'concluida' THEN 1 ELSE 0 END, d.prazo IS NULL, d.prazo, d.id DESC`, [h, id]);
   const usuariosComAcesso = ehAdmin(req.usuario)
-    ? db.prepare(`SELECT u.id, u.nome FROM usuario_clientes uc JOIN usuarios u ON u.id = uc.usuario_id
-        WHERE uc.cliente_id = ? ORDER BY u.nome COLLATE NOCASE`).all(id)
+    ? await db.all(`SELECT u.id, u.nome FROM usuario_clientes uc JOIN usuarios u ON u.id = uc.usuario_id
+        WHERE uc.cliente_id = ? ORDER BY lower(u.nome)`, [id])
     : undefined;
   res.json({
     ...cliente,
@@ -75,35 +75,34 @@ r.get('/:id', (req, res) => {
   });
 });
 
-r.post('/', (req, res) => {
+r.post('/', async (req, res) => {
   const d = validarCliente(req.body);
-  const id = transacao(() => {
-    const info = db.prepare(`INSERT INTO clientes (nome, documento, email, telefone, observacoes, criado_por)
-      VALUES (?, ?, ?, ?, ?, ?)`).run(d.nome, d.documento, d.email, d.telefone, d.observacoes, req.usuario.id);
-    const novoId = Number(info.lastInsertRowid);
+  const id = await transacao(async (t) => {
+    const novo = await t.get(`INSERT INTO clientes (nome, documento, email, telefone, observacoes, criado_por)
+      VALUES (?, ?, ?, ?, ?, ?) RETURNING id`, [d.nome, d.documento, d.email, d.telefone, d.observacoes, req.usuario.id]);
     // Quem cadastra passa a ter acesso ao cliente
     if (!ehAdmin(req.usuario)) {
-      db.prepare('INSERT INTO usuario_clientes (usuario_id, cliente_id) VALUES (?, ?)').run(req.usuario.id, novoId);
+      await t.exec('INSERT INTO usuario_clientes (usuario_id, cliente_id) VALUES (?, ?)', [req.usuario.id, novo.id]);
     }
-    return novoId;
+    return novo.id;
   });
   res.status(201).json({ id, mensagem: 'Cliente cadastrado com sucesso.' });
 });
 
-r.put('/:id', (req, res) => {
+r.put('/:id', async (req, res) => {
   const id = idParam(req.params.id);
-  carregarAcessivel(req.usuario, id);
+  await carregarAcessivel(req.usuario, id);
   const d = validarCliente(req.body);
-  db.prepare(`UPDATE clientes SET nome = ?, documento = ?, email = ?, telefone = ?, observacoes = ?,
-    atualizado_em = datetime('now') WHERE id = ?`).run(d.nome, d.documento, d.email, d.telefone, d.observacoes, id);
+  await db.exec(`UPDATE clientes SET nome = ?, documento = ?, email = ?, telefone = ?, observacoes = ?,
+    atualizado_em = now() WHERE id = ?`, [d.nome, d.documento, d.email, d.telefone, d.observacoes, id]);
   res.json({ mensagem: 'Cliente atualizado com sucesso.' });
 });
 
-r.delete('/:id', (req, res) => {
+r.delete('/:id', async (req, res) => {
   const id = idParam(req.params.id);
-  carregarAcessivel(req.usuario, id);
-  const n = db.prepare('SELECT COUNT(*) AS n FROM demandas WHERE cliente_id = ?').get(id).n;
-  db.prepare('DELETE FROM clientes WHERE id = ?').run(id);
+  await carregarAcessivel(req.usuario, id);
+  const n = (await db.get('SELECT COUNT(*) AS n FROM demandas WHERE cliente_id = ?', [id])).n;
+  await db.exec('DELETE FROM clientes WHERE id = ?', [id]);
   res.json({
     mensagem: n
       ? `Cliente excluído junto com ${n} demanda(s) vinculada(s).`
