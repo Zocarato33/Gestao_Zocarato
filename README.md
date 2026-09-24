@@ -224,7 +224,7 @@ Não é preciso criar tabelas: o sistema faz isso sozinho no primeiro acesso.
 
 ### 2. Sistema na Vercel
 
-1. Em https://vercel.com, importe este repositório (**Add New > Project**). A Vercel reconhece o Express sozinha: o `src/server.js` vira uma função e a pasta `public/` é servida pelo CDN.
+1. Em https://vercel.com, importe este repositório (**Add New > Project**), mantendo as configurações padrão. O `vercel.json` já define tudo: a pasta `public/` é servida pelo CDN e as rotas `/api/*` vão para a função em `api/index.js`.
 2. Conecte o banco: a forma mais simples é a integração do Neon no Marketplace da Vercel (**Storage > Neon**), que cria o banco e cadastra a `DATABASE_URL` automaticamente. Se o banco foi criado direto no Neon, cadastre a `DATABASE_URL` em **Settings > Environment Variables**.
 3. Faça um novo deploy (**Deployments > Redeploy**) para aplicar as variáveis.
 
@@ -294,6 +294,7 @@ No GitHub, os testes e o build da imagem Docker rodam automaticamente (GitHub Ac
 ```
 Gestao_Zocarato/
 ├── .github/workflows/      Testes automáticos no GitHub Actions
+├── api/index.js            Entrada da função serverless na Vercel
 ├── src/
 │   ├── server.js           Servidor, segurança e tratamento de erros
 │   ├── db.js               Conexão com o PostgreSQL e criação das tabelas
