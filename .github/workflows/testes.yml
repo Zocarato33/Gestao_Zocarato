@@ -8,6 +8,21 @@ on:
 jobs:
   testes:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_PASSWORD: teste
+          POSTGRES_DB: gestao
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      TEST_DATABASE_URL: postgres://postgres:teste@localhost:5432/gestao
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -18,10 +33,10 @@ jobs:
       - run: npm test
       - name: Build da imagem Docker
         run: docker build -t gestao-demandas .
-      - name: Contêiner inicia com volume de propriedade do root
+      - name: Contêiner inicia e conecta ao PostgreSQL
         run: |
-          mkdir -p /tmp/dados && sudo chown root:root /tmp/dados
-          docker run -d --name gd -p 3000:3000 -v /tmp/dados:/app/data gestao-demandas
+          docker run -d --name gd --network host \
+            -e DATABASE_URL=postgres://postgres:teste@localhost:5432/gestao gestao-demandas
           for i in $(seq 1 30); do
             if curl -fs http://localhost:3000/api/auth/status; then exit 0; fi
             sleep 1

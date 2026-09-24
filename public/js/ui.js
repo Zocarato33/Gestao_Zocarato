@@ -94,11 +94,11 @@ export function dataBr(iso) {
   return `${d}/${m}/${a}`;
 }
 
-/** Converte "AAAA-MM-DD HH:MM:SS" (UTC do SQLite) para data e hora locais. */
-export function dataHoraBr(sqlite) {
-  if (!sqlite) return '';
-  const d = new Date(`${sqlite.replace(' ', 'T')}Z`);
-  if (Number.isNaN(d.getTime())) return sqlite;
+/** Converte a data e hora do servidor (ISO 8601 em UTC) para data e hora locais. */
+export function dataHoraBr(valor) {
+  if (!valor) return '';
+  const d = new Date(valor);
+  if (Number.isNaN(d.getTime())) return valor;
   return d.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
 }
 

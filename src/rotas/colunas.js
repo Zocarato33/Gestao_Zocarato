@@ -12,11 +12,11 @@ const NOMES_RESERVADOS = [
   'status', 'prioridade', 'prazo', 'observações', 'observacoes', 'ações', 'acoes',
 ];
 
-function listarColunas() {
-  return db.prepare(`
+async function listarColunas() {
+  return (await db.all(`
     SELECT c.id, c.nome, c.tipo, c.opcoes, c.ordem,
       (SELECT COUNT(*) FROM valores_colunas v WHERE v.coluna_id = c.id AND v.valor IS NOT NULL) AS preenchidos
-    FROM colunas c ORDER BY c.ordem, c.id`).all()
+    FROM colunas c ORDER BY c.ordem, c.id`))
     .map((c) => ({ ...c, opcoes: c.opcoes ? JSON.parse(c.opcoes) : [] }));
 }
 
@@ -34,25 +34,25 @@ function validarOpcoes(bruto) {
   return { opcoes: limpas };
 }
 
-function validarNome(v, ignorarId = 0) {
+async function validarNome(v, ignorarId = 0) {
   const nome = v.saida.nome;
   if (!nome || v.erros.nome) return;
   if (NOMES_RESERVADOS.includes(nome.toLowerCase())) {
     v.erro('nome', 'Este nome já é usado por um campo padrão da demanda.');
-  } else if (db.prepare('SELECT 1 FROM colunas WHERE nome = ? AND id <> ?').get(nome, ignorarId)) {
+  } else if (await db.get('SELECT 1 FROM colunas WHERE lower(nome) = lower(?) AND id <> ?', [nome, ignorarId])) {
     v.erro('nome', 'Já existe uma coluna com este nome.');
   }
 }
 
-r.get('/', (_req, res) => res.json(listarColunas()));
+r.get('/', async (_req, res) => res.json(await listarColunas()));
 
 r.use(exigirAdmin);
 
-r.post('/', (req, res) => {
+r.post('/', async (req, res) => {
   const v = new Validador(req.body)
     .texto('nome', 'o nome da coluna', { obrigatorio: true, max: 40 })
     .enumeracao('tipo', 'o tipo do campo', TIPOS_COLUNA);
-  validarNome(v);
+  await validarNome(v);
   let opcoes = null;
   if (v.saida.tipo === 'lista') {
     const o = validarOpcoes(req.body.opcoes);
@@ -60,18 +60,18 @@ r.post('/', (req, res) => {
     else opcoes = o.opcoes;
   }
   const d = v.verificar();
-  const ordem = db.prepare('SELECT COALESCE(MAX(ordem), 0) + 1 AS o FROM colunas').get().o;
-  const info = db.prepare('INSERT INTO colunas (nome, tipo, opcoes, ordem) VALUES (?, ?, ?, ?)')
-    .run(d.nome, d.tipo, opcoes ? JSON.stringify(opcoes) : null, ordem);
-  res.status(201).json({ id: Number(info.lastInsertRowid), mensagem: `Coluna "${d.nome}" criada.` });
+  const nova = await db.get(`INSERT INTO colunas (nome, tipo, opcoes, ordem)
+    VALUES (?, ?, ?, (SELECT COALESCE(MAX(ordem), 0) + 1 FROM colunas)) RETURNING id`,
+  [d.nome, d.tipo, opcoes ? JSON.stringify(opcoes) : null]);
+  res.status(201).json({ id: nova.id, mensagem: `Coluna "${d.nome}" criada.` });
 });
 
-r.put('/:id', (req, res) => {
+r.put('/:id', async (req, res) => {
   const id = idParam(req.params.id);
-  const col = db.prepare('SELECT * FROM colunas WHERE id = ?').get(id);
+  const col = await db.get('SELECT * FROM colunas WHERE id = ?', [id]);
   if (!col) throw naoEncontrado('Coluna');
   const v = new Validador(req.body).texto('nome', 'o nome da coluna', { obrigatorio: true, max: 40 });
-  validarNome(v, id);
+  await validarNome(v, id);
   let opcoes = null;
   if (col.tipo === 'lista') {
     const o = validarOpcoes(req.body.opcoes ?? JSON.parse(col.opcoes || '[]'));
@@ -79,16 +79,13 @@ r.put('/:id', (req, res) => {
     else opcoes = o.opcoes;
   }
   const d = v.verificar();
-  let removidos = 0;
-  transacao(() => {
-    db.prepare('UPDATE colunas SET nome = ?, opcoes = ? WHERE id = ?')
-      .run(d.nome, opcoes ? JSON.stringify(opcoes) : null, id);
-    if (opcoes) {
-      // Valores que não existem mais na lista são limpos para manter a consistência
-      const marcadores = opcoes.map(() => '?').join(',');
-      removidos = Number(db.prepare(`DELETE FROM valores_colunas WHERE coluna_id = ? AND valor NOT IN (${marcadores})`)
-        .run(id, ...opcoes).changes);
-    }
+  const removidos = await transacao(async (t) => {
+    await t.exec('UPDATE colunas SET nome = ?, opcoes = ? WHERE id = ?', [d.nome, opcoes ? JSON.stringify(opcoes) : null, id]);
+    if (!opcoes) return 0;
+    // Valores que não existem mais na lista são limpos para manter a consistência
+    const marcadores = opcoes.map(() => '?').join(',');
+    return (await t.exec(`DELETE FROM valores_colunas WHERE coluna_id = ? AND valor NOT IN (${marcadores})`,
+      [id, ...opcoes])).rowCount;
   });
   res.json({
     mensagem: removidos
@@ -97,12 +94,12 @@ r.put('/:id', (req, res) => {
   });
 });
 
-r.delete('/:id', (req, res) => {
+r.delete('/:id', async (req, res) => {
   const id = idParam(req.params.id);
-  const col = db.prepare('SELECT * FROM colunas WHERE id = ?').get(id);
+  const col = await db.get('SELECT * FROM colunas WHERE id = ?', [id]);
   if (!col) throw naoEncontrado('Coluna');
-  const n = db.prepare('SELECT COUNT(*) AS n FROM valores_colunas WHERE coluna_id = ?').get(id).n;
-  db.prepare('DELETE FROM colunas WHERE id = ?').run(id);
+  const n = (await db.get('SELECT COUNT(*) AS n FROM valores_colunas WHERE coluna_id = ?', [id])).n;
+  await db.exec('DELETE FROM colunas WHERE id = ?', [id]);
   res.json({ mensagem: `Coluna "${col.nome}" excluída${n ? ` com ${n} valor(es) preenchido(s)` : ''}.` });
 });
 

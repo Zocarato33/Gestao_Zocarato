@@ -38,10 +38,10 @@ function validarForcaSenha(senha) {
 
 const hashToken = (t) => crypto.createHash('sha256').update(t).digest('hex');
 
-function criarSessao(res, usuarioId) {
+async function criarSessao(res, usuarioId, executor = db) {
   const token = crypto.randomBytes(32).toString('base64url');
-  db.prepare('INSERT INTO sessoes (token_hash, usuario_id, expira_em) VALUES (?, ?, ?)')
-    .run(hashToken(token), usuarioId, Date.now() + SESSAO_MS);
+  await executor.exec('INSERT INTO sessoes (token_hash, usuario_id, expira_em) VALUES (?, ?, ?)',
+    [hashToken(token), usuarioId, Date.now() + SESSAO_MS]);
   res.cookie(COOKIE, token, {
     httpOnly: true,
     sameSite: 'strict',
@@ -51,9 +51,9 @@ function criarSessao(res, usuarioId) {
   });
 }
 
-function encerrarSessao(req, res) {
+async function encerrarSessao(req, res) {
   const token = req.cookies[COOKIE];
-  if (token) db.prepare('DELETE FROM sessoes WHERE token_hash = ?').run(hashToken(token));
+  if (token) await db.exec('DELETE FROM sessoes WHERE token_hash = ?', [hashToken(token)]);
   res.clearCookie(COOKIE, { path: '/', sameSite: 'strict', secure: COOKIE_SECURE, httpOnly: true });
 }
 
@@ -76,23 +76,23 @@ function lerCookies(req, _res, next) {
 }
 
 /** Carrega o usuário da sessão, se houver, e renova a validade (sessão deslizante). */
-function carregarUsuario(req, res, next) {
+async function carregarUsuario(req, res, next) {
   req.usuario = null;
   const token = req.cookies[COOKIE];
   if (!token) return next();
   const th = hashToken(token);
-  const linha = db.prepare(`
+  const linha = await db.get(`
     SELECT u.id, u.nome, u.email, u.papel, u.ativo, s.expira_em
     FROM sessoes s JOIN usuarios u ON u.id = s.usuario_id
-    WHERE s.token_hash = ?`).get(th);
+    WHERE s.token_hash = ?`, [th]);
   if (!linha || linha.expira_em < Date.now() || !linha.ativo) {
-    if (linha) db.prepare('DELETE FROM sessoes WHERE token_hash = ?').run(th);
+    if (linha) await db.exec('DELETE FROM sessoes WHERE token_hash = ?', [th]);
     return next();
   }
   // Renova apenas se passou mais de 10 minutos da última renovação
   const novoVencimento = Date.now() + SESSAO_MS;
   if (novoVencimento - linha.expira_em > 10 * 60 * 1000) {
-    db.prepare('UPDATE sessoes SET expira_em = ? WHERE token_hash = ?').run(novoVencimento, th);
+    await db.exec('UPDATE sessoes SET expira_em = ? WHERE token_hash = ?', [novoVencimento, th]);
     res.cookie(COOKIE, token, {
       httpOnly: true, sameSite: 'strict', secure: COOKIE_SECURE, maxAge: SESSAO_MS, path: '/',
     });
@@ -128,26 +128,26 @@ function filtroClientes(usuario, colunaClienteId = 'c.id') {
   };
 }
 
-function podeAcessarCliente(usuario, clienteId) {
+async function podeAcessarCliente(usuario, clienteId) {
   if (ehAdmin(usuario)) {
-    return !!db.prepare('SELECT 1 FROM clientes WHERE id = ?').get(clienteId);
+    return !!(await db.get('SELECT 1 FROM clientes WHERE id = ?', [clienteId]));
   }
-  return !!db.prepare('SELECT 1 FROM usuario_clientes WHERE usuario_id = ? AND cliente_id = ?')
-    .get(usuario.id, clienteId);
+  return !!(await db.get('SELECT 1 FROM usuario_clientes WHERE usuario_id = ? AND cliente_id = ?',
+    [usuario.id, clienteId]));
 }
 
 /** Verifica se um usuário (possível responsável) tem acesso ao cliente informado. */
-function usuarioTemAcessoAoCliente(usuarioId, clienteId) {
-  const u = db.prepare('SELECT papel, ativo FROM usuarios WHERE id = ?').get(usuarioId);
+async function usuarioTemAcessoAoCliente(usuarioId, clienteId) {
+  const u = await db.get('SELECT papel, ativo FROM usuarios WHERE id = ?', [usuarioId]);
   if (!u || !u.ativo) return false;
   if (u.papel === 'admin') return true;
-  return !!db.prepare('SELECT 1 FROM usuario_clientes WHERE usuario_id = ? AND cliente_id = ?')
-    .get(usuarioId, clienteId);
+  return !!(await db.get('SELECT 1 FROM usuario_clientes WHERE usuario_id = ? AND cliente_id = ?',
+    [usuarioId, clienteId]));
 }
 
 // ---------- Limite de tentativas de login ----------
+// Guardado no banco para valer entre instâncias do servidor (inclusive funções serverless).
 
-const tentativas = new Map();
 const JANELA_MS = 15 * 60 * 1000;
 const MAX_TENTATIVAS = 8;
 
@@ -155,38 +155,32 @@ function chaveTentativa(req, email) {
   return `${req.ip}|${String(email || '').toLowerCase()}`;
 }
 
-function verificarBloqueio(req, email) {
-  const chave = chaveTentativa(req, email);
-  const reg = tentativas.get(chave);
-  if (reg && reg.bloqueadoAte > Date.now()) {
-    const minutos = Math.ceil((reg.bloqueadoAte - Date.now()) / 60000);
+async function verificarBloqueio(req, email) {
+  const reg = await db.get('SELECT bloqueado_ate FROM tentativas_login WHERE chave = ?', [chaveTentativa(req, email)]);
+  if (reg && reg.bloqueado_ate > Date.now()) {
+    const minutos = Math.ceil((reg.bloqueado_ate - Date.now()) / 60000);
     throw new ErroHttp(429, `Muitas tentativas de acesso. Tente novamente em ${minutos} minuto(s).`);
   }
 }
 
-function registrarFalha(req, email) {
-  const chave = chaveTentativa(req, email);
+async function registrarFalha(req, email) {
   const agora = Date.now();
-  const reg = tentativas.get(chave) || { contagem: 0, inicio: agora, bloqueadoAte: 0 };
-  if (agora - reg.inicio > JANELA_MS) {
-    reg.contagem = 0;
-    reg.inicio = agora;
-  }
-  reg.contagem += 1;
-  if (reg.contagem >= MAX_TENTATIVAS) reg.bloqueadoAte = agora + JANELA_MS;
-  tentativas.set(chave, reg);
+  // Reinicia a contagem quando a janela expirou; bloqueia ao atingir o limite
+  await db.exec(`
+    INSERT INTO tentativas_login (chave, contagem, inicio, bloqueado_ate) VALUES (?, 1, ?, 0)
+    ON CONFLICT (chave) DO UPDATE SET
+      contagem = CASE WHEN ? - tentativas_login.inicio > ? THEN 1 ELSE tentativas_login.contagem + 1 END,
+      inicio = CASE WHEN ? - tentativas_login.inicio > ? THEN ? ELSE tentativas_login.inicio END`,
+  [chaveTentativa(req, email), agora, agora, JANELA_MS, agora, JANELA_MS, agora]);
+  await db.exec('UPDATE tentativas_login SET bloqueado_ate = ? WHERE chave = ? AND contagem >= ?',
+    [agora + JANELA_MS, chaveTentativa(req, email), MAX_TENTATIVAS]);
+  // Limpeza oportunista de registros antigos
+  await db.exec('DELETE FROM tentativas_login WHERE ? - inicio > ? AND bloqueado_ate < ?', [agora, JANELA_MS, agora]);
 }
 
-function limparFalhas(req, email) {
-  tentativas.delete(chaveTentativa(req, email));
+async function limparFalhas(req, email) {
+  await db.exec('DELETE FROM tentativas_login WHERE chave = ?', [chaveTentativa(req, email)]);
 }
-
-setInterval(() => {
-  const agora = Date.now();
-  for (const [k, v] of tentativas) {
-    if (agora - v.inicio > JANELA_MS && v.bloqueadoAte < agora) tentativas.delete(k);
-  }
-}, JANELA_MS).unref();
 
 module.exports = {
   gerarHashSenha, conferirSenha, HASH_FICTICIO, validarForcaSenha,

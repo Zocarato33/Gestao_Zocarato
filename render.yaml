@@ -2,9 +2,11 @@ services:
   - type: web
     name: gestao-demandas
     runtime: docker
-    plan: starter
+    plan: free
     healthCheckPath: /api/auth/status
     envVars:
+      - key: DATABASE_URL
+        sync: false
       - key: COOKIE_SECURE
         value: "true"
       - key: TRUST_PROXY
@@ -13,7 +15,3 @@ services:
         value: America/Sao_Paulo
       - key: SESSAO_HORAS
         value: "12"
-    disk:
-      name: dados
-      mountPath: /app/data
-      sizeGB: 1

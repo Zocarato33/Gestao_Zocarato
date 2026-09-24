@@ -26,10 +26,11 @@ Sistema web para cadastrar clientes, registrar demandas e acompanhar prazos, com
 |---|---|
 | Node.js | 22.13 ou superior (recomendado: versão LTS mais recente) |
 | npm | Instalado junto com o Node.js |
+| PostgreSQL | 14 ou superior (local, via Docker, ou gratuito no [Neon](https://neon.tech)) |
 | Sistema operacional | Windows, macOS ou Linux |
 | Navegador | Chrome, Edge, Firefox ou Safari atualizados |
 
-O banco de dados é o SQLite embutido no próprio Node.js. Não é preciso instalar nenhum servidor de banco nem compilar módulos nativos.
+O banco de dados é o PostgreSQL. A forma mais simples de ter um é criar um projeto gratuito no Neon e copiar a connection string. Para desenvolvimento local, `docker compose up -d db` sobe um PostgreSQL na sua máquina.
 
 Para conferir a versão do Node.js instalada:
 
@@ -52,7 +53,10 @@ npm install
 # 3. Crie o arquivo de configuração a partir do modelo
 cp .env.example .env        # Windows (PowerShell): Copy-Item .env.example .env
 
-# 4. Inicie o sistema
+# 4. Edite o .env e informe a DATABASE_URL (Neon ou PostgreSQL local)
+#    Para usar o PostgreSQL local do Docker: docker compose up -d db
+
+# 5. Inicie o sistema
 npm start
 ```
 
@@ -64,22 +68,23 @@ Para acessar pelo celular na mesma rede, use o endereço IP do computador, por e
 
 ## 3. Configuração
 
-As configurações ficam no arquivo `.env` na raiz do projeto. Todas são opcionais.
+As configurações ficam no arquivo `.env` na raiz do projeto. Na Vercel e na Render, elas são cadastradas no painel da plataforma. Apenas `DATABASE_URL` é obrigatória.
 
 | Variável | Padrão | Descrição |
 |---|---|---|
+| `DATABASE_URL` | (obrigatória) | Connection string do PostgreSQL, por exemplo a do Neon |
 | `PORT` | `3000` | Porta HTTP do servidor |
-| `DB_PATH` | `./data/gestao.db` | Caminho do arquivo do banco de dados |
 | `APP_TZ` | `America/Sao_Paulo` | Fuso horário usado para calcular prazos vencidos |
 | `SESSAO_HORAS` | `12` | Tempo de inatividade até a sessão expirar |
 | `COOKIE_SECURE` | `false` | Use `true` quando o sistema estiver atrás de HTTPS |
-| `TRUST_PROXY` | `false` | Use `true` se houver proxy reverso (Nginx, Caddy, IIS) |
+| `TRUST_PROXY` | `false` | Use `true` se houver proxy reverso (Vercel, Render, Nginx, Caddy, IIS) |
+| `DB_POOL_MAX` | `5` | Máximo de conexões simultâneas abertas com o banco |
 
 ## 4. Banco de dados
 
 ### Criação
 
-O banco é criado **automaticamente** na primeira execução, no caminho definido em `DB_PATH`. As tabelas e índices também são criados automaticamente. Não há script manual a rodar.
+As tabelas e índices são criados **automaticamente** na primeira execução, no banco indicado em `DATABASE_URL`. Não há script manual a rodar. Conexões com servidores remotos, como o Neon, usam SSL automaticamente.
 
 ### Tabelas
 
@@ -87,6 +92,7 @@ O banco é criado **automaticamente** na primeira execução, no caminho definid
 |---|---|
 | `usuarios` | Contas de acesso, perfil (administrador ou usuário) e situação |
 | `sessoes` | Sessões ativas (apenas o hash do token é guardado) |
+| `tentativas_login` | Controle de tentativas de login falhas, para o bloqueio temporário |
 | `clientes` | Cadastro de clientes |
 | `usuario_clientes` | Quais clientes cada usuário comum pode acessar |
 | `demandas` | Demandas com todos os campos padrão |
@@ -101,15 +107,17 @@ Regras de integridade aplicadas pelo próprio banco:
 
 ### Backup
 
-O banco inteiro fica em um único arquivo. Para backup com o sistema em uso, prefira o comando do SQLite, que gera uma cópia consistente:
+No Neon, o histórico do banco é guardado automaticamente e pode ser restaurado pelo painel (a janela de restauração depende do plano). Para uma cópia manual, use o `pg_dump` com a mesma connection string:
 
 ```bash
-sqlite3 data/gestao.db ".backup 'backup-2026-09-24.db'"
+pg_dump "$DATABASE_URL" > backup-2026-09-24.sql
 ```
 
-Com o sistema parado, basta copiar o arquivo `data/gestao.db` (e os arquivos `-wal` e `-shm`, se existirem).
+Para restaurar em um banco vazio:
 
-Para restaurar, pare o sistema, substitua o arquivo e inicie novamente.
+```bash
+psql "$DATABASE_URL" < backup-2026-09-24.sql
+```
 
 ## 5. Primeiro acesso
 
@@ -187,50 +195,56 @@ Clique no seu nome (ou nas iniciais, no celular) para alterar a senha. As outras
 docker compose up -d --build
 ```
 
-O sistema fica disponível em http://localhost:3000 e o banco é guardado no volume `dados`, preservado entre reinicializações e atualizações.
+Sobe o sistema e um PostgreSQL local. O sistema fica disponível em http://localhost:3000 e o banco é guardado no volume `dados`, preservado entre reinicializações e atualizações.
 
 Criar administrador pelo terminal dentro do contêiner:
 
 ```bash
-docker compose exec -u node gestao-demandas node --disable-warning=ExperimentalWarning scripts/criar-admin.js
+docker compose exec gestao-demandas node scripts/criar-admin.js
 ```
 
 Backup do banco a partir do contêiner:
 
 ```bash
-docker compose cp gestao-demandas:/app/data/gestao.db ./backup.db
+docker compose exec db pg_dump -U postgres gestao > backup.sql
 ```
 
 ## 9. Colocando em produção
 
-O sistema precisa de um servidor que fique ligado o tempo todo e de um disco persistente para o arquivo do banco. Por isso **não funciona na Vercel** nem em outras plataformas serverless: lá o disco é temporário e os dados se perderiam. O arquivo `vercel.json` desativa os deploys automáticos da Vercel para evitar publicar uma versão quebrada.
-
-O repositório já vem pronto para duas plataformas que atendem esses requisitos. Nas duas, o HTTPS é automático.
+A configuração gratuita recomendada é **Neon** (banco) + **Vercel** (sistema). Nas duas o HTTPS é automático e cada push na `main` publica uma nova versão.
 
 > **Importante:** logo após o primeiro deploy, abra o endereço publicado e crie o administrador na tela **Primeiro acesso**. Enquanto isso não for feito, qualquer pessoa que acessar o endereço pode criar o administrador.
 
-### Railway
+### 1. Banco no Neon
 
-1. Em https://railway.com, crie um projeto com **Deploy from GitHub repo** e escolha este repositório. O arquivo `railway.json` já configura o build pelo `Dockerfile` e a verificação de saúde.
-2. No serviço criado, adicione um **Volume** com o caminho de montagem `/app/data`.
-3. Em **Variables**, cadastre `COOKIE_SECURE=true` e `TRUST_PROXY=true`.
-4. Em **Settings > Networking**, clique em **Generate Domain** para obter o endereço público.
+1. Crie uma conta gratuita em https://neon.tech e um projeto (escolha a região mais próxima dos usuários, por exemplo **AWS São Paulo** se disponível).
+2. No painel do projeto, clique em **Connect** e copie a connection string com **Connection pooling** ativado (o endereço contém `-pooler`). Ela tem o formato `postgresql://usuario:senha@ep-xxxx-pooler.regiao.aws.neon.tech/neondb?sslmode=require`.
 
-Volumes exigem o plano pago (Hobby). Cada push na `main` gera um novo deploy automaticamente.
+Não é preciso criar tabelas: o sistema faz isso sozinho no primeiro acesso.
 
-### Render
+### 2. Sistema na Vercel
 
-1. Em https://render.com, escolha **New > Blueprint** e selecione este repositório. O arquivo `render.yaml` cria o serviço com Docker, o disco persistente de 1 GB em `/app/data` e as variáveis de ambiente.
-2. Confirme a criação. O endereço público aparece no painel do serviço.
+1. Em https://vercel.com, importe este repositório (**Add New > Project**). A Vercel reconhece o Express sozinha: o `src/server.js` vira uma função e a pasta `public/` é servida pelo CDN.
+2. Em **Settings > Environment Variables**, cadastre:
+   - `DATABASE_URL` com a connection string do Neon
+   - `COOKIE_SECURE` = `true`
+   - `TRUST_PROXY` = `true`
+3. Faça um novo deploy (**Deployments > Redeploy**) para aplicar as variáveis.
 
-O disco persistente exige o plano pago (Starter). Cada push na `main` gera um novo deploy automaticamente.
+Alternativa: a integração do Neon no Marketplace da Vercel (**Storage > Neon**) cria o banco e cadastra a `DATABASE_URL` automaticamente.
+
+O plano gratuito (Hobby) da Vercel é para uso não comercial. Para uso pela empresa, avalie o plano Pro ou a opção da Render abaixo.
+
+### Alternativa: Render
+
+O arquivo `render.yaml` cria o serviço no plano gratuito da Render usando o `Dockerfile`. Em https://render.com, escolha **New > Blueprint**, selecione este repositório e informe a `DATABASE_URL` do Neon quando for pedida. No plano gratuito, o serviço hiberna após 15 minutos sem acesso, e o primeiro acesso seguinte demora cerca de um minuto.
 
 ### Servidor próprio
 
 1. **Use HTTPS.** Coloque o sistema atrás de um proxy reverso (Nginx, Caddy, IIS ou o balanceador da sua nuvem) com certificado válido, e configure `COOKIE_SECURE=true` e `TRUST_PROXY=true`.
 2. **Mantenha o processo ativo.** Use Docker (`restart: unless-stopped` já está configurado), systemd, PM2 ou o serviço equivalente do seu servidor.
-3. **Agende backups** do arquivo do banco.
-4. **Restrinja o acesso à pasta `data/`**, que contém o banco.
+3. **Agende backups** do banco com `pg_dump`.
+4. **Proteja a `DATABASE_URL`**, que contém a senha do banco: nunca a publique no repositório.
 
 Exemplo mínimo de Nginx:
 
@@ -249,13 +263,13 @@ server {
 }
 ```
 
-Capacidade: o SQLite atende bem equipes de dezenas de usuários simultâneos e dezenas de milhares de demandas. Para volumes muito maiores ou vários servidores em paralelo, o próximo passo seria migrar para PostgreSQL.
+Capacidade: o PostgreSQL atende com folga equipes de dezenas de usuários simultâneos e centenas de milhares de demandas.
 
 ### Medidas de segurança implementadas
 
 - Senhas armazenadas com scrypt e sal individual; comparação em tempo constante.
 - Sessão em cookie `HttpOnly` e `SameSite=Strict`; no banco fica apenas o hash do token.
-- Bloqueio temporário após 8 tentativas de login falhas em 15 minutos.
+- Bloqueio temporário após 8 tentativas de login falhas em 15 minutos (registrado no banco, vale para todas as instâncias).
 - Proteção contra CSRF por cabeçalho obrigatório nas operações que alteram dados.
 - Política de segurança de conteúdo (CSP) que só permite scripts do próprio sistema.
 - Todo texto vindo do banco é exibido como texto puro, o que impede injeção de HTML.
@@ -268,7 +282,13 @@ Capacidade: o SQLite atende bem equipes de dezenas de usuários simultâneos e d
 npm test
 ```
 
-Os testes usam um banco temporário (o banco real não é afetado) e cobrem: primeiro acesso, login, isolamento de dados entre usuários, validações, colunas personalizadas, filtros, indicadores, exclusões em cascata e regras de administração.
+Os testes precisam de um PostgreSQL. Por padrão usam `postgres://postgres:teste@localhost:5432/gestao`; para outro endereço, defina `TEST_DATABASE_URL`. Um PostgreSQL de testes pode ser criado com:
+
+```bash
+docker run -d --name pg-teste -e POSTGRES_PASSWORD=teste -e POSTGRES_DB=gestao -p 5432:5432 postgres:17-alpine
+```
+
+Cada execução cria um schema temporário e o apaga ao final (os dados existentes não são afetados). Os testes cobrem: primeiro acesso, login, isolamento de dados entre usuários, validações, colunas personalizadas, filtros, indicadores, exclusões em cascata, bloqueio de login e regras de administração.
 
 No GitHub, os testes e o build da imagem Docker rodam automaticamente (GitHub Actions) a cada push na `main` e em todo pull request.
 
@@ -279,7 +299,7 @@ Gestao_Zocarato/
 ├── .github/workflows/      Testes automáticos no GitHub Actions
 ├── src/
 │   ├── server.js           Servidor, segurança e tratamento de erros
-│   ├── db.js               Conexão e criação do banco
+│   ├── db.js               Conexão com o PostgreSQL e criação das tabelas
 │   ├── auth.js             Senhas, sessões e controle de acesso
 │   ├── validacao.js        Regras de validação e constantes
 │   └── rotas/              auth, usuarios, clientes, demandas, colunas
@@ -289,14 +309,11 @@ Gestao_Zocarato/
 │   └── js/                 app, api, ui, painel, demandaForm, colunas, clientes, usuarios
 ├── scripts/criar-admin.js
 ├── test/api.test.js
-├── data/                   Banco de dados (criado automaticamente)
 ├── .env.example
 ├── Dockerfile
-├── docker-entrypoint.sh    Ajusta a permissão do volume e inicia o sistema
-├── docker-compose.yml
-├── railway.json            Deploy na Railway
+├── docker-compose.yml      Sistema + PostgreSQL local
 ├── render.yaml             Deploy na Render
-└── vercel.json             Desativa deploys automáticos da Vercel
+└── vercel.json             Cabeçalhos de segurança na Vercel
 ```
 
 ## 12. API
@@ -326,17 +343,20 @@ Erros de validação retornam status 422 com o formato `{ "erro": "mensagem", "c
 
 ## 13. Solução de problemas
 
-**"No such built-in module: node:sqlite"**
-A versão do Node.js é antiga. Instale a 22.13 ou superior.
+**"Defina a variável DATABASE_URL"**
+O arquivo `.env` não existe ou está sem a `DATABASE_URL`. Copie o `.env.example` e informe a connection string.
+
+**"Não foi possível conectar ao banco de dados"**
+Confira a `DATABASE_URL` (usuário, senha e endereço). No Neon, o endereço deve terminar com `?sslmode=require`. Em banco local, verifique se o PostgreSQL está rodando.
 
 **A porta 3000 já está em uso**
 Altere `PORT` no arquivo `.env`.
 
 **Esqueci a senha do administrador**
-Rode `npm run criar-admin` com o mesmo e-mail e informe uma nova senha.
+Rode `npm run criar-admin` com o mesmo e-mail e informe uma nova senha. O comando usa a `DATABASE_URL` do `.env`; para o banco de produção, coloque nela a connection string do Neon.
 
 **Não consigo entrar: "Muitas tentativas de acesso"**
-Aguarde 15 minutos ou reinicie o servidor.
+Aguarde 15 minutos. Para liberar na hora, apague o registro no banco (no Neon, pelo **SQL Editor**): `DELETE FROM tentativas_login;`
 
 **Os prazos aparecem como vencidos um dia antes ou depois**
 Confira a variável `APP_TZ`.

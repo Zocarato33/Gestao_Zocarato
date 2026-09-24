@@ -2,7 +2,7 @@
 
 const path = require('node:path');
 const express = require('express');
-const { DB_PATH } = require('./db');
+const { prontoParaUso, descricaoBanco } = require('./db');
 const { lerCookies, carregarUsuario, exigirLogin } = require('./auth');
 const { ErroHttp } = require('./validacao');
 
@@ -35,8 +35,17 @@ app.use((_req, res, next) => {
 });
 
 app.use(express.json({ limit: '200kb' }));
+app.use((req, _res, next) => {
+  if (req.body === undefined) req.body = {};
+  next();
+});
 app.use(lerCookies);
-app.use(carregarUsuario);
+// Garante que as tabelas existam antes da primeira consulta
+app.use('/api', async (_req, _res, next) => {
+  await prontoParaUso();
+  next();
+});
+app.use('/api', carregarUsuario);
 
 // Proteção adicional contra CSRF: requisições que alteram dados precisam do cabeçalho da aplicação
 app.use('/api', (req, _res, next) => {
@@ -60,7 +69,7 @@ app.use('/api/demandas', exigirLogin, require('./rotas/demandas'));
 app.use('/api', (_req, _res, next) => next(new ErroHttp(404, 'Recurso não encontrado.')));
 
 app.use(express.static(path.join(__dirname, '..', 'public'), { index: 'index.html', maxAge: '1h' }));
-app.get('*', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'index.html')));
+app.get('/{*caminho}', (_req, res) => res.sendFile(path.join(__dirname, '..', 'public', 'index.html')));
 
 // Tratamento centralizado de erros
 // eslint-disable-next-line no-unused-vars
@@ -74,7 +83,8 @@ app.use((err, req, res, _next) => {
   if (err.type === 'entity.too.large') {
     return res.status(413).json({ erro: 'Os dados enviados excedem o tamanho permitido.' });
   }
-  if (err.code === 'ERR_SQLITE_ERROR' && /constraint/i.test(err.message)) {
+  // Violações de unicidade, chave estrangeira e restrições CHECK do PostgreSQL
+  if (['23505', '23503', '23514'].includes(err.code)) {
     return res.status(409).json({ erro: 'A operação viola uma regra de integridade dos dados.' });
   }
   console.error(`[erro] ${req.method} ${req.originalUrl}`, err);
@@ -82,10 +92,17 @@ app.use((err, req, res, _next) => {
 });
 
 if (require.main === module) {
-  app.listen(PORT, () => {
-    console.log(`Gestão de Demandas em execução: http://localhost:${PORT}`);
-    console.log(`Banco de dados: ${DB_PATH}`);
-  });
+  prontoParaUso()
+    .then(() => {
+      app.listen(PORT, () => {
+        console.log(`Gestão de Demandas em execução: http://localhost:${PORT}`);
+        console.log(`Banco de dados: ${descricaoBanco()}`);
+      });
+    })
+    .catch((erro) => {
+      console.error('Não foi possível conectar ao banco de dados:', erro.message);
+      process.exit(1);
+    });
 }
 
 module.exports = app;
