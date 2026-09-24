@@ -1,0 +1,19 @@
+{
+  "name": "gestao-demandas",
+  "version": "1.0.0",
+  "description": "Sistema de gestão de clientes e demandas",
+  "main": "src/server.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning src/server.js",
+    "dev": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning --watch src/server.js",
+    "criar-admin": "node --env-file-if-exists=.env --disable-warning=ExperimentalWarning scripts/criar-admin.js",
+    "test": "node --disable-warning=ExperimentalWarning --test test/api.test.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2"
+  }
+}

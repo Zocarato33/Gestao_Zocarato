@@ -1,0 +1,19 @@
+services:
+  gestao-demandas:
+    build: .
+    container_name: gestao-demandas
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: 3000
+      DB_PATH: /app/data/gestao.db
+      APP_TZ: America/Sao_Paulo
+      SESSAO_HORAS: 12
+      COOKIE_SECURE: "false"
+      TRUST_PROXY: "false"
+    volumes:
+      - dados:/app/data
+
+volumes:
+  dados:
