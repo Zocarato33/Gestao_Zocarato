@@ -254,3 +254,42 @@ test('regras de usuários e exclusões', async () => {
   r = await ana.req('POST', '/api/auth/logout');
   assert.equal((await ana.req('GET', '/api/demandas')).status, 401);
 });
+
+test('responsável que perdeu o acesso não bloqueia a edição da demanda', async () => {
+  let r = await admin.req('POST', '/api/clientes', { nome: 'Construtora Delta' });
+  ids.delta = r.dados.id;
+  r = await admin.req('POST', '/api/usuarios', { nome: 'Carla', email: 'carla@teste.com', senha: 'Senha1234', clienteIds: [ids.delta] });
+  ids.carla = r.dados.id;
+  r = await admin.req('POST', '/api/demandas', { titulo: 'Due diligence', cliente_id: ids.delta, responsavel_id: ids.carla });
+  assert.equal(r.status, 201);
+  ids.d3 = r.dados.id;
+  r = await admin.req('POST', '/api/demandas', { titulo: 'Notificação', cliente_id: ids.delta });
+  ids.d4 = r.dados.id;
+
+  // Carla é desativada: a demanda dela continua editável sem trocar o responsável
+  r = await admin.req('PUT', `/api/usuarios/${ids.carla}`, { nome: 'Carla', email: 'carla@teste.com', papel: 'usuario', ativo: false, clienteIds: [ids.delta] });
+  assert.equal(r.status, 200);
+  r = await admin.req('PATCH', `/api/demandas/${ids.d3}`, { status: 'em_andamento' });
+  assert.equal(r.status, 200);
+  assert.equal(r.dados.demanda.responsavel_id, ids.carla);
+  r = await admin.req('GET', `/api/demandas/${ids.d3}`);
+  r = await admin.req('PUT', `/api/demandas/${ids.d3}`, { ...r.dados, prioridade: 'alta' });
+  assert.equal(r.status, 200);
+
+  // Mas não pode ser atribuída a outra demanda nem acompanhar a troca de cliente
+  r = await admin.req('PATCH', `/api/demandas/${ids.d4}`, { responsavel_id: ids.carla });
+  assert.equal(r.status, 422);
+  r = await admin.req('PATCH', `/api/demandas/${ids.d3}`, { cliente_id: ids.alfa });
+  assert.equal(r.status, 422);
+});
+
+test('busca trata % e _ como texto literal', async () => {
+  let r = await admin.req('GET', '/api/demandas?busca=%25');
+  assert.equal(r.dados.demandas.length, 0);
+  r = await admin.req('GET', '/api/demandas?busca=_');
+  assert.equal(r.dados.demandas.length, 0);
+  r = await admin.req('GET', '/api/clientes?busca=%25');
+  assert.equal(r.dados.length, 0);
+  r = await admin.req('GET', '/api/demandas?busca=diligence');
+  assert.equal(r.dados.demandas.length, 1);
+});

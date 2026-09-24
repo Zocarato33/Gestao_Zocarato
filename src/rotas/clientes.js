@@ -3,7 +3,7 @@
 const express = require('express');
 const { db, transacao } = require('../db');
 const { filtroClientes, podeAcessarCliente, ehAdmin } = require('../auth');
-const { Validador, naoEncontrado, idParam, hoje } = require('../validacao');
+const { Validador, naoEncontrado, idParam, hoje, termoLike } = require('../validacao');
 
 const r = express.Router();
 
@@ -42,8 +42,9 @@ r.get('/', (req, res) => {
     LEFT JOIN demandas d ON d.cliente_id = c.id
     WHERE ${f.sql}`;
   if (busca) {
-    sql += ' AND (c.nome LIKE ? OR c.documento LIKE ? OR c.email LIKE ? OR c.telefone LIKE ?)';
-    const termo = `%${busca}%`;
+    sql += ` AND (c.nome LIKE ? ESCAPE '\\' OR c.documento LIKE ? ESCAPE '\\'
+      OR c.email LIKE ? ESCAPE '\\' OR c.telefone LIKE ? ESCAPE '\\')`;
+    const termo = termoLike(busca);
     params.push(termo, termo, termo, termo);
   }
   sql += ' GROUP BY c.id ORDER BY c.nome COLLATE NOCASE';

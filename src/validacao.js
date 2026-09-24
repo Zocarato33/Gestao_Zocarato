@@ -58,6 +58,11 @@ function dataValida(valor) {
   return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === valor;
 }
 
+/** Monta o padrão "contém" do LIKE tratando %, _ e \ como texto literal (usar com ESCAPE). */
+function termoLike(texto) {
+  return `%${String(texto).replace(/[\\%_]/g, '\\$&')}%`;
+}
+
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/;
 
 /**
@@ -191,5 +196,5 @@ function validarValorColuna(coluna, bruto) {
 module.exports = {
   STATUS, PRIORIDADES, TIPOS_COLUNA,
   ErroHttp, ErroValidacao, naoEncontrado, proibido,
-  Validador, idParam, hoje, somarDias, dataValida, validarValorColuna,
+  Validador, idParam, hoje, somarDias, dataValida, termoLike, validarValorColuna,
 };

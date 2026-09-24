@@ -5,7 +5,7 @@ const { db, transacao } = require('../db');
 const { filtroClientes, podeAcessarCliente, usuarioTemAcessoAoCliente } = require('../auth');
 const { listarColunas } = require('./colunas');
 const {
-  Validador, ErroValidacao, naoEncontrado, idParam, hoje, somarDias, dataValida,
+  Validador, ErroValidacao, naoEncontrado, idParam, hoje, somarDias, dataValida, termoLike,
   STATUS, PRIORIDADES, validarValorColuna,
 } = require('../validacao');
 
@@ -62,9 +62,10 @@ function montarFiltros(usuario, q, { incluirStatusPrazo = true } = {}) {
 
   const busca = String(q.busca || '').trim();
   if (busca) {
-    const t = `%${busca}%`;
-    cond.push(`(d.titulo LIKE ? OR d.descricao LIKE ? OR d.observacoes LIKE ? OR c.nome LIKE ?
-      OR EXISTS (SELECT 1 FROM valores_colunas v WHERE v.demanda_id = d.id AND v.valor LIKE ?)
+    const t = termoLike(busca);
+    cond.push(`(d.titulo LIKE ? ESCAPE '\\' OR d.descricao LIKE ? ESCAPE '\\' OR d.observacoes LIKE ? ESCAPE '\\'
+      OR c.nome LIKE ? ESCAPE '\\'
+      OR EXISTS (SELECT 1 FROM valores_colunas v WHERE v.demanda_id = d.id AND v.valor LIKE ? ESCAPE '\\')
       OR CAST(d.id AS TEXT) = ?)`);
     params.push(t, t, t, t, t, busca.replace(/^#/, ''));
   }
@@ -166,7 +167,7 @@ r.get('/:id', (req, res) => {
 /**
  * Valida os dados completos de uma demanda (campos padrão + personalizados).
  */
-function validarDemanda(usuario, body) {
+function validarDemanda(usuario, body, atual = null) {
   const v = new Validador(body)
     .texto('titulo', 'o título', { obrigatorio: true, min: 3, max: 200 })
     .texto('descricao', 'a descrição', { max: 5000 })
@@ -182,7 +183,10 @@ function validarDemanda(usuario, body) {
     v.erro('cliente_id', 'Cliente não encontrado ou sem permissão de acesso.');
   }
   const respId = v.saida.responsavel_id;
-  if (respId && !v.erros.responsavel_id && clienteId && !v.erros.cliente_id
+  // Um responsável que foi desativado ou perdeu o acesso continua na demanda até ser trocado,
+  // desde que o cliente também não mude
+  const mantido = atual && atual.responsavel_id === respId && atual.cliente_id === clienteId;
+  if (respId && !mantido && !v.erros.responsavel_id && clienteId && !v.erros.cliente_id
     && !usuarioTemAcessoAoCliente(respId, clienteId)) {
     v.erro('responsavel_id', 'Este responsável não tem acesso ao cliente selecionado.');
   }
@@ -247,7 +251,7 @@ function atualizar(req, res, parcial) {
       throw new ErroValidacao({}, 'Nenhuma alteração enviada.');
     }
   }
-  const d = validarDemanda(req.usuario, corpo);
+  const d = validarDemanda(req.usuario, corpo, atual);
   transacao(() => {
     db.prepare(`UPDATE demandas SET titulo = ?, descricao = ?, cliente_id = ?, responsavel_id = ?, status = ?,
       prioridade = ?, prazo = ?, observacoes = ?, atualizado_em = datetime('now') WHERE id = ?`).run(

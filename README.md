@@ -42,8 +42,9 @@ Se estiver abaixo de 22.13, baixe a versão LTS em https://nodejs.org.
 ## 2. Instalação e execução
 
 ```bash
-# 1. Entre na pasta do projeto
-cd gestao-demandas
+# 1. Baixe o projeto e entre na pasta
+git clone https://github.com/Zocarato33/Gestao_Zocarato.git
+cd Gestao_Zocarato
 
 # 2. Instale as dependências
 npm install
@@ -245,10 +246,13 @@ npm test
 
 Os testes usam um banco temporário (o banco real não é afetado) e cobrem: primeiro acesso, login, isolamento de dados entre usuários, validações, colunas personalizadas, filtros, indicadores, exclusões em cascata e regras de administração.
 
+No GitHub, os testes e o build da imagem Docker rodam automaticamente (GitHub Actions) a cada push na `main` e em todo pull request.
+
 ## 11. Estrutura do projeto
 
 ```
-gestao-demandas/
+Gestao_Zocarato/
+├── .github/workflows/      Testes automáticos no GitHub Actions
 ├── src/
 │   ├── server.js           Servidor, segurança e tratamento de erros
 │   ├── db.js               Conexão e criação do banco
