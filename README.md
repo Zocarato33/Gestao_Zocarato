@@ -1,6 +1,6 @@
-# Gestão de Clientes e Demandas
+# Gestor Legal Oper
 
-Sistema web para cadastrar clientes, registrar demandas e acompanhar prazos, com autenticação, controle de acesso por cliente, colunas personalizadas e tabela editável. Funciona em computador e celular.
+Sistema web para cadastrar clientes, registrar demandas, acompanhar prazos e manter a tabela de preços dos contratos, com autenticação, controle de acesso por cliente, colunas personalizadas, tabela editável e layout configurável (ordem, visibilidade e campos obrigatórios). Funciona em computador e celular.
 
 ## Sumário
 
@@ -99,10 +99,13 @@ As tabelas e índices são criados **automaticamente** na primeira execução, n
 | `colunas` | Definição das colunas personalizadas (nome, tipo, opções e se pertencem a demandas ou a clientes) |
 | `valores_colunas` | Valores das colunas personalizadas em cada demanda |
 | `valores_colunas_clientes` | Valores das colunas personalizadas em cada cliente |
+| `precos` | Tabela de preços: contratos por cliente com valor do ticket e vigência |
+| `valores_colunas_precos` | Valores das colunas personalizadas em cada registro da tabela de preços |
+| `layout_campos` | Ordem, visibilidade e obrigatoriedade dos campos de cada tela |
 
 Regras de integridade aplicadas pelo próprio banco:
 
-- Excluir um cliente exclui as demandas dele.
+- Excluir um cliente exclui as demandas dele e os registros dele na tabela de preços.
 - Excluir uma coluna personalizada exclui os valores dela.
 - Excluir um usuário deixa as demandas dele sem responsável.
 
@@ -142,6 +145,8 @@ Regras de senha: mínimo de 8 caracteres, com letras e números.
 | Cadastrar, editar e excluir clientes | Sim | Sim, nos clientes a que tem acesso |
 | Cadastrar, editar e excluir demandas | Sim | Sim, nos clientes a que tem acesso |
 | Criar, renomear e excluir colunas personalizadas | Sim | Não (preenche os valores normalmente) |
+| Configurar o Layout e as Regras dos Campos | Sim | Não (as regras valem para todos) |
+| Ver e editar a Tabela de Preços | Sim | Não |
 | Gerenciar usuários e liberar clientes | Sim | Não |
 
 Detalhes importantes:
@@ -181,6 +186,30 @@ A gestão de colunas é restrita a administradores porque excluir uma coluna apa
 - **Colunas de clientes (administrador):** pelo botão **Colunas** da lista, ou por **Nova coluna** dentro do formulário de cliente, crie campos próprios (texto, número, data ou lista de opções), como segmento ou data de renovação do contrato. Eles aparecem em **Campos adicionais** no formulário, na página do cliente e como colunas na lista. Criar uma coluna pelo formulário não apaga o que já foi digitado. As colunas de clientes são independentes das colunas de demandas.
 - Ao abrir um cliente: dados cadastrais, resumo por status e lista das demandas com status, prioridade, prazo e responsável. É possível criar uma demanda já vinculada ao cliente.
 - CPF ou CNPJ é opcional, mas se preenchido precisa ter 11 ou 14 dígitos.
+
+### Tabela de Preços (administrador)
+
+- Um registro por contrato: **cliente** (escolhido entre os cadastrados), **nº do contrato**, **valor do ticket**, **início** e **vencimento do contrato** e **atendimento aplicado**.
+- O valor aceita o formato brasileiro (`1.500,50`) e é exibido em reais. O vencimento não pode ser anterior ao início.
+- A tabela é ordenada pelo vencimento e mostra a situação de cada contrato: **Vencido** (em vermelho), **Vence em N dias** (em amarelo, quando faltam até 30 dias) ou **Vigente**.
+- Busca por cliente, nº do contrato, atendimento ou campos adicionais, filtro por cliente e soma dos tickets exibidos.
+- O botão **Colunas** cria campos próprios (por exemplo, índice de reajuste), como nas outras telas.
+- Excluir um cliente exclui também os registros dele na tabela de preços.
+
+### Layout | Regras Campos (administrador)
+
+Tela para ajustar, em um só lugar, **Demandas**, **Clientes** e **Tabela de Preços** (uma aba para cada):
+
+- **Ordem das colunas:** use as setas para subir ou descer cada coluna. A ordem da lista é a ordem da tabela, da esquerda para a direita.
+- **Visível na tabela:** desmarque para esconder a coluna da tabela de todos os usuários. Os campos continuam nos formulários.
+- **Obrigatório:** marque para exigir o preenchimento no formulário. Os campos obrigatórios aparecem com `*`, e o servidor recusa o cadastro sem eles.
+- **Inserir e excluir colunas:** o botão **Nova coluna** cria colunas personalizadas na tela da aba escolhida; na lista, cada coluna personalizada tem as opções de renomear e excluir.
+- Campos que só existem no formulário (como Descrição, CPF ou CNPJ, e-mail) aparecem em uma seção separada, só com a regra de obrigatório.
+- Alguns itens são fixos para manter o sistema consistente: o título da demanda, o nome do cliente e o cliente da tabela de preços sempre aparecem e são sempre obrigatórios; colunas calculadas (como "Em aberto") não têm regra de obrigatório.
+- As alterações só valem depois de **Salvar alterações**. Trocar de aba com alterações pendentes pede confirmação.
+- Tornar um campo obrigatório não bloqueia registros antigos: na edição direta pela tabela, a regra só é conferida no campo que está sendo alterado.
+
+Na lista de clientes, o menu **Exibir colunas** continua disponível para cada pessoa esconder, só para si, colunas liberadas no layout.
 
 ### Usuários (administrador)
 
@@ -303,11 +332,12 @@ Gestao_Zocarato/
 │   ├── db.js               Conexão com o PostgreSQL e criação das tabelas
 │   ├── auth.js             Senhas, sessões e controle de acesso
 │   ├── validacao.js        Regras de validação e constantes
-│   └── rotas/              auth, usuarios, clientes, demandas, colunas
+│   ├── layout.js           Campos de cada tela e regras de obrigatório
+│   └── rotas/              auth, usuarios, clientes, demandas, colunas, precos, layout
 ├── public/
 │   ├── index.html
 │   ├── css/app.css
-│   └── js/                 app, api, ui, painel, demandaForm, colunas, clientes, usuarios
+│   └── js/                 app, api, ui, painel, demandaForm, colunas, clientes, precos, layoutCampos, usuarios
 ├── scripts/criar-admin.js
 ├── test/api.test.js
 ├── .env.example
@@ -332,8 +362,12 @@ Todas as rotas ficam em `/api`, exigem sessão (exceto as de autenticação) e r
 | GET, PUT, DELETE | `/api/clientes/:id` | Consultar com demandas, editar e excluir |
 | GET, POST | `/api/demandas` | Listar com filtros e indicadores; criar |
 | GET, PUT, PATCH, DELETE | `/api/demandas/:id` | Consultar, editar completo, editar parcial e excluir |
-| GET, POST | `/api/colunas` | Listar e criar (criar exige administrador). Use `?entidade=cliente` na listagem e `"entidade": "cliente"` na criação para as colunas de clientes |
+| GET, POST | `/api/colunas` | Listar e criar (criar exige administrador). Use `?entidade=cliente` ou `?entidade=preco` na listagem e `"entidade"` na criação para as colunas de clientes e da tabela de preços |
 | PUT, DELETE | `/api/colunas/:id` | Renomear e excluir (administrador) |
+| GET, POST | `/api/precos` | Tabela de preços: listar (`?busca=`, `?cliente=`) e incluir (administrador) |
+| GET, PUT, DELETE | `/api/precos/:id` | Consultar, editar e excluir um registro (administrador) |
+| GET | `/api/layout` | Layout e regras dos campos de todas as telas |
+| PUT | `/api/layout/:entidade` | Salvar ordem, visibilidade e obrigatoriedade de uma tela (`demanda`, `cliente` ou `preco`; administrador) |
 | GET | `/api/usuarios/opcoes` | Pessoas que podem ser responsáveis |
 | GET, POST | `/api/usuarios` | Listar e cadastrar (administrador) |
 | PUT, DELETE | `/api/usuarios/:id` | Editar e excluir (administrador) |

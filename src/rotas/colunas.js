@@ -11,6 +11,7 @@ const r = express.Router();
 const ENTIDADES = {
   demanda: { tabela: 'valores_colunas' },
   cliente: { tabela: 'valores_colunas_clientes' },
+  preco: { tabela: 'valores_colunas_precos' },
 };
 
 // Nomes já usados pelos campos e colunas padrão de cada tela
@@ -23,6 +24,11 @@ const NOMES_RESERVADOS = {
     'id', 'cliente', 'nome', 'nome ou razão social', 'razão social', 'razao social', 'cpf', 'cnpj', 'cpf/cnpj',
     'cpf ou cnpj', 'documento', 'e-mail', 'email', 'telefone', 'contato', 'observações', 'observacoes',
     'demandas', 'em aberto', 'vencidas', 'ações', 'acoes',
+  ],
+  preco: [
+    'id', 'cliente', 'nº do contrato', 'número do contrato', 'numero do contrato', 'contrato', 'valor', 'valor do ticket',
+    'ticket', 'início do contrato', 'inicio do contrato', 'início', 'inicio', 'vencimento', 'vencimento do contrato',
+    'atendimento', 'atendimento aplicado', 'ações', 'acoes',
   ],
 };
 
@@ -55,7 +61,8 @@ async function validarNome(v, entidade, ignorarId = 0) {
   const nome = v.saida.nome;
   if (!nome || v.erros.nome) return;
   if (NOMES_RESERVADOS[entidade].includes(nome.toLowerCase())) {
-    v.erro('nome', `Este nome já é usado por um campo padrão ${entidade === 'cliente' ? 'do cliente' : 'da demanda'}.`);
+    const tela = { demanda: 'da demanda', cliente: 'do cliente', preco: 'da tabela de preços' }[entidade];
+    v.erro('nome', `Este nome já é usado por um campo padrão ${tela}.`);
   } else if (await db.get('SELECT 1 FROM colunas WHERE entidade = ? AND lower(nome) = lower(?) AND id <> ?',
     [entidade, nome, ignorarId])) {
     v.erro('nome', 'Já existe uma coluna com este nome.');
@@ -118,7 +125,10 @@ r.delete('/:id', async (req, res) => {
   const col = await db.get('SELECT * FROM colunas WHERE id = ?', [id]);
   if (!col) throw naoEncontrado('Coluna');
   const n = (await db.get(`SELECT COUNT(*) AS n FROM ${ENTIDADES[col.entidade].tabela} WHERE coluna_id = ?`, [id])).n;
-  await db.exec('DELETE FROM colunas WHERE id = ?', [id]);
+  await transacao(async (t) => {
+    await t.exec('DELETE FROM layout_campos WHERE entidade = ? AND chave = ?', [col.entidade, `extra_${id}`]);
+    await t.exec('DELETE FROM colunas WHERE id = ?', [id]);
+  });
   res.json({ mensagem: `Coluna "${col.nome}" excluída${n ? ` com ${n} valor(es) preenchido(s)` : ''}.` });
 });
 

@@ -2,7 +2,9 @@ import {
   el, campo, opcoesSelect, abrirModal, confirmar, sucesso, erro, ocupado, limparErros,
   tratarErroFormulario, dataHoraBr, STATUS, PRIORIDADES,
 } from './ui.js';
-import { get, post, put, del, estado, responsaveisDoCliente } from './api.js';
+import {
+  get, post, put, del, estado, responsaveisDoCliente, obrigatorio, colunasOrdenadas,
+} from './api.js';
 
 /** Converte o valor salvo para exibição no controle. */
 export function valorParaControle(coluna, valor) {
@@ -84,7 +86,7 @@ export async function abrirFormDemanda({ id, clienteId, aoSalvar } = {}) {
   const descricao = el('textarea', { rows: 4, maxlength: 5000, text: d.descricao || '' });
   const observacoes = el('textarea', { rows: 3, maxlength: 5000, text: d.observacoes || '' });
 
-  const controlesExtras = estado.colunas.map((col) => ({
+  const controlesExtras = colunasOrdenadas('demanda').map((col) => ({
     col,
     controle: controleColuna(col, d.campos[col.id]),
   }));
@@ -93,17 +95,21 @@ export async function abrirFormDemanda({ id, clienteId, aoSalvar } = {}) {
     el('div', { class: 'grade grade-2' },
       campo('Título', titulo, { nome: 'titulo', obrigatorio: true, classe: 'coluna-inteira' }),
       campo('Cliente', cliente, { nome: 'cliente_id', obrigatorio: true }),
-      campo('Responsável', responsavel, { nome: 'responsavel_id', ajuda: 'Somente pessoas com acesso ao cliente.' }),
+      campo('Responsável', responsavel, {
+        nome: 'responsavel_id', ajuda: 'Somente pessoas com acesso ao cliente.', obrigatorio: obrigatorio('demanda', 'responsavel'),
+      }),
       campo('Status', status, { nome: 'status', obrigatorio: true }),
       campo('Prioridade', prioridade, { nome: 'prioridade', obrigatorio: true }),
-      campo('Prazo', prazo, { nome: 'prazo' }),
-      campo('Descrição', descricao, { nome: 'descricao', classe: 'coluna-inteira' }),
-      campo('Observações', observacoes, { nome: 'observacoes', classe: 'coluna-inteira' })),
+      campo('Prazo', prazo, { nome: 'prazo', obrigatorio: obrigatorio('demanda', 'prazo') }),
+      campo('Descrição', descricao, { nome: 'descricao', classe: 'coluna-inteira', obrigatorio: obrigatorio('demanda', 'descricao') }),
+      campo('Observações', observacoes, { nome: 'observacoes', classe: 'coluna-inteira', obrigatorio: obrigatorio('demanda', 'observacoes') })),
     controlesExtras.length
       ? el('fieldset', { class: 'grupo-extra' },
         el('legend', { text: 'Campos adicionais' }),
         el('div', { class: 'grade grade-2' },
-          controlesExtras.map(({ col, controle }) => campo(col.nome, controle, { nome: `campo_${col.id}` }))))
+          controlesExtras.map(({ col, controle }) => campo(col.nome, controle, {
+            nome: `campo_${col.id}`, obrigatorio: obrigatorio('demanda', `extra_${col.id}`),
+          }))))
       : null,
     demanda
       ? el('p', { class: 'meta' },

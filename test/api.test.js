@@ -361,3 +361,130 @@ test('colunas personalizadas de clientes', async () => {
   r = await admin.req('GET', '/api/colunas?entidade=cliente');
   assert.deepEqual(r.dados.map((c) => c.nome), ['Segmento']);
 });
+
+test('layout: ordem, visibilidade e campos obrigatórios', async () => {
+  let r = await admin.req('GET', '/api/layout');
+  assert.equal(r.status, 200);
+  assert.deepEqual(Object.keys(r.dados), ['demanda', 'cliente', 'preco']);
+  const demanda = r.dados.demanda;
+  assert.equal(demanda[0].chave, 'id');
+  const titulo = demanda.find((i) => i.chave === 'titulo');
+  assert.equal(titulo.podeOcultar, false);
+  assert.equal(titulo.podeObrigar, false);
+
+  // Apenas administradores alteram
+  assert.equal((await ana.req('PUT', '/api/layout/demanda', { campos: [] })).status, 403);
+  assert.equal((await admin.req('PUT', '/api/layout/inexistente', { campos: [] })).status, 404);
+  r = await admin.req('PUT', '/api/layout/demanda', { campos: [{ chave: 'nao_existe' }] });
+  assert.equal(r.status, 422);
+
+  // Reordena (prazo primeiro), oculta prioridade, torna prazo obrigatório; título não pode ser ocultado
+  const ordem = ['prazo', ...demanda.map((i) => i.chave).filter((c) => c !== 'prazo')];
+  r = await admin.req('PUT', '/api/layout/demanda', {
+    campos: ordem.map((chave) => ({
+      chave,
+      visivel: !['prioridade', 'titulo'].includes(chave),
+      obrigatorio: chave === 'prazo',
+    })),
+  });
+  assert.equal(r.status, 200);
+  const novo = r.dados.layout;
+  assert.equal(novo[0].chave, 'prazo');
+  assert.equal(novo.find((i) => i.chave === 'prioridade').visivel, false);
+  assert.equal(novo.find((i) => i.chave === 'titulo').visivel, true, 'título continua visível');
+  assert.equal(novo.find((i) => i.chave === 'prazo').obrigatorio, true);
+
+  // Regra aplicada: criar sem prazo falha; edição parcial de outro campo continua liberada
+  r = await admin.req('POST', '/api/demandas', { titulo: 'Sem prazo', cliente_id: ids.alfa });
+  assert.equal(r.status, 422);
+  assert.ok(r.dados.campos.prazo);
+  r = await admin.req('POST', '/api/demandas', { titulo: 'Com prazo', cliente_id: ids.alfa, prazo: '2027-01-15' });
+  assert.equal(r.status, 201);
+  const semPrazo = (await admin.req('GET', '/api/demandas?prazo=sem_prazo')).dados.demandas[0];
+  r = await admin.req('PATCH', `/api/demandas/${semPrazo.id}`, { status: 'em_andamento' });
+  assert.equal(r.status, 200, 'demanda antiga sem prazo ainda pode mudar de status');
+  r = await admin.req('PATCH', `/api/demandas/${semPrazo.id}`, { prazo: '' });
+  assert.equal(r.status, 422, 'mas não pode ter o prazo apagado');
+
+  // Coluna personalizada obrigatória em clientes
+  const colSeg = ids.colCliSeg;
+  const cliente = (await admin.req('GET', '/api/layout')).dados.cliente;
+  r = await admin.req('PUT', '/api/layout/cliente', {
+    campos: cliente.map((i) => ({ chave: i.chave, visivel: i.visivel, obrigatorio: i.chave === `extra_${colSeg}` || i.chave === 'email' })),
+  });
+  assert.equal(r.status, 200);
+  r = await admin.req('POST', '/api/clientes', { nome: 'Sem segmento' });
+  assert.equal(r.status, 422);
+  assert.ok(r.dados.campos[`campo_${colSeg}`] && r.dados.campos.email);
+  r = await admin.req('POST', '/api/clientes', { nome: 'Com segmento', email: 'a@b.com', campos: { [colSeg]: 'Banco' } });
+  assert.equal(r.status, 201);
+
+  // Excluir a coluna remove também a configuração dela
+  await admin.req('DELETE', `/api/colunas/${colSeg}`);
+  const { rows } = await pool.query('SELECT 1 FROM layout_campos WHERE chave = $1', [`extra_${colSeg}`]);
+  assert.equal(rows.length, 0);
+
+  // Limpa as regras para não afetar os próximos testes
+  await admin.req('PUT', '/api/layout/demanda', { campos: demanda.map((i) => ({ chave: i.chave, visivel: true, obrigatorio: false })) });
+  await admin.req('PUT', '/api/layout/cliente', { campos: cliente.map((i) => ({ chave: i.chave, visivel: true, obrigatorio: false })) });
+});
+
+test('tabela de preços', async () => {
+  assert.equal((await ana.req('GET', '/api/precos')).status, 403, 'restrita a administradores');
+
+  let r = await admin.req('POST', '/api/precos', { valor_ticket: '1.500,00' });
+  assert.equal(r.status, 422);
+  assert.ok(r.dados.campos.cliente_id);
+
+  r = await admin.req('POST', '/api/precos', { cliente_id: ids.alfa });
+  assert.equal(r.status, 422, 'valor do ticket é obrigatório por padrão');
+  assert.ok(r.dados.campos.valor_ticket);
+
+  r = await admin.req('POST', '/api/precos', {
+    cliente_id: ids.alfa, valor_ticket: 'abc', inicio_contrato: '2026-05-01', vencimento_contrato: '2026-01-01',
+  });
+  assert.equal(r.status, 422);
+  assert.ok(r.dados.campos.valor_ticket && r.dados.campos.vencimento_contrato);
+
+  r = await admin.req('POST', '/api/precos', {
+    cliente_id: ids.alfa, numero_contrato: 'CT-2026-001', valor_ticket: 'R$ 1.500,50',
+    inicio_contrato: '2026-01-01', vencimento_contrato: '2026-12-31', atendimento: 'Consultivo',
+  });
+  assert.equal(r.status, 201);
+  assert.equal(r.dados.preco.valor_ticket, 1500.5);
+  assert.equal(r.dados.preco.cliente_nome, 'Banco Alfa');
+  ids.p1 = r.dados.id;
+
+  // Coluna personalizada da tabela de preços
+  r = await admin.req('POST', '/api/colunas', { nome: 'Reajuste', tipo: 'texto', entidade: 'preco' });
+  assert.equal(r.status, 201);
+  const colReaj = r.dados.id;
+  r = await admin.req('POST', '/api/colunas', { nome: 'Vencimento', tipo: 'data', entidade: 'preco' });
+  assert.equal(r.status, 422, 'nome reservado da tabela de preços');
+
+  r = await admin.req('PUT', `/api/precos/${ids.p1}`, {
+    cliente_id: ids.alfa, numero_contrato: 'CT-2026-001', valor_ticket: 2000, atendimento: 'Contencioso',
+    campos: { [colReaj]: 'IPCA' },
+  });
+  assert.equal(r.status, 200);
+  assert.equal(r.dados.preco.valor_ticket, 2000);
+  assert.deepEqual(r.dados.preco.campos, { [colReaj]: 'IPCA' });
+
+  r = await admin.req('GET', '/api/precos?busca=ipca');
+  assert.deepEqual(r.dados.precos.map((p) => p.id), [ids.p1]);
+  r = await admin.req('GET', '/api/precos?busca=ct-2026');
+  assert.equal(r.dados.precos.length, 1);
+  r = await admin.req('GET', `/api/precos?cliente=${ids.omega}`);
+  assert.equal(r.dados.precos.length, 0);
+
+  // Excluir o cliente remove seus contratos
+  const tmp = await admin.req('POST', '/api/clientes', { nome: 'Cliente Temporário' });
+  await admin.req('POST', '/api/precos', { cliente_id: tmp.dados.id, valor_ticket: 10 });
+  await admin.req('DELETE', `/api/clientes/${tmp.dados.id}`);
+  r = await admin.req('GET', '/api/precos');
+  assert.deepEqual(r.dados.precos.map((p) => p.id), [ids.p1]);
+
+  r = await admin.req('DELETE', `/api/precos/${ids.p1}`);
+  assert.equal(r.status, 200);
+  assert.equal((await admin.req('GET', `/api/precos/${ids.p1}`)).status, 404);
+});

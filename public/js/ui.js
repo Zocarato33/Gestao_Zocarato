@@ -39,6 +39,10 @@ const ICONES = {
   menu: '<circle cx="12" cy="5" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="12" cy="19" r="1.4"/>',
   ordenar: '<path d="M8 10l4-4 4 4M8 14l4 4 4-4"/>',
   alerta: '<path d="M12 3l10 18H2L12 3z"/><path d="M12 10v5M12 18v.5"/>',
+  preco: '<path d="M3 12V4a1 1 0 0 1 1-1h8l9 9-9 9-9-9z"/><circle cx="7.5" cy="7.5" r="1.5"/>',
+  layout: '<rect x="3.5" y="3.5" width="17" height="17" rx="2"/><path d="M3.5 9h17M9 9v11.5"/><path d="M13 13h4M13 16.5h4"/>',
+  cima: '<path d="M6 15l6-6 6 6"/>',
+  baixo: '<path d="M6 9l6 6 6-6"/>',
 };
 
 export function icone(nome, tamanho = 18) {
@@ -100,6 +104,13 @@ export function dataHoraBr(valor) {
   const d = new Date(valor);
   if (Number.isNaN(d.getTime())) return valor;
   return d.toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
+}
+
+/** Formata um valor em reais: 1500.5 vira "R$ 1.500,50". */
+export function moedaBr(valor) {
+  if (valor === null || valor === undefined || valor === '') return '';
+  const n = Number(valor);
+  return Number.isFinite(n) ? n.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' }) : String(valor);
 }
 
 export function numeroBr(valor) {

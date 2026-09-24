@@ -65,6 +65,8 @@ app.use('/api/usuarios', exigirLogin, require('./rotas/usuarios'));
 app.use('/api/clientes', exigirLogin, require('./rotas/clientes'));
 app.use('/api/colunas', exigirLogin, require('./rotas/colunas').router);
 app.use('/api/demandas', exigirLogin, require('./rotas/demandas'));
+app.use('/api/precos', exigirLogin, require('./rotas/precos'));
+app.use('/api/layout', exigirLogin, require('./rotas/layout'));
 
 app.use('/api', (_req, _res, next) => next(new ErroHttp(404, 'Recurso não encontrado.')));
 
@@ -95,7 +97,7 @@ if (require.main === module) {
   prontoParaUso()
     .then(() => {
       app.listen(PORT, () => {
-        console.log(`Gestão de Demandas em execução: http://localhost:${PORT}`);
+        console.log(`Gestor Legal Oper em execução: http://localhost:${PORT}`);
         console.log(`Banco de dados: ${descricaoBanco()}`);
       });
     })
