@@ -1,9 +1,19 @@
 import {
   el, icone, limpar, campo, abrirModal, confirmar, sucesso, erro, ocupado, limparErros,
-  tratarErroFormulario, debounce, vazio, chipStatus, chipPrioridade, descreverPrazo, dataBr, dataHoraBr, STATUS,
+  tratarErroFormulario, debounce, vazio, chipStatus, chipPrioridade, descreverPrazo, dataBr, dataHoraBr, numeroBr,
+  guardar, recuperar, STATUS,
 } from './ui.js';
 import { get, post, put, del, estado, recarregarClientes, ehAdmin } from './api.js';
-import { abrirFormDemanda } from './demandaForm.js';
+import { abrirFormDemanda, controleColuna } from './demandaForm.js';
+import { abrirGerenciadorColunas } from './colunas.js';
+
+/** Valor de uma coluna personalizada formatado para leitura. */
+function valorLegivel(col, valor) {
+  if (valor === null || valor === undefined || valor === '') return '';
+  if (col.tipo === 'numero') return numeroBr(valor);
+  if (col.tipo === 'data') return dataBr(valor);
+  return String(valor);
+}
 
 function mascaraDocumento(v) {
   const d = v.replace(/\D/g, '').slice(0, 14);
@@ -33,13 +43,43 @@ export function abrirFormCliente(cliente, aoSalvar) {
   documento.addEventListener('input', () => { documento.value = mascaraDocumento(documento.value); });
   telefone.addEventListener('input', () => { telefone.value = mascaraTelefone(telefone.value); });
 
+  // Campos adicionais (colunas personalizadas de clientes). O administrador pode criar novas
+  // colunas daqui mesmo; os valores já digitados são preservados ao redesenhar.
+  let extras = [];
+  const grupoExtra = el('fieldset', { class: 'grupo-extra' });
+  function renderExtras() {
+    const digitados = new Map(extras.map(({ col, controle }) => [col.id, controle.value]));
+    const valores = cliente?.campos || {};
+    extras = estado.colunasClientes.map((col) => ({
+      col,
+      controle: controleColuna(col, digitados.has(col.id) ? digitados.get(col.id) : valores[col.id]),
+    }));
+    grupoExtra.hidden = !extras.length && !ehAdmin();
+    limpar(grupoExtra).append(...[
+      el('legend', { text: 'Campos adicionais' }),
+      extras.length
+        ? el('div', { class: 'grade grade-2' },
+          extras.map(({ col, controle }) => campo(col.nome, controle, { nome: `campo_${col.id}` })))
+        : el('p', { class: 'meta', text: 'Nenhum campo adicional ainda. Crie colunas para registrar outras informações dos clientes.' }),
+      ehAdmin()
+        ? el('div', { class: 'acoes-extra' },
+          el('button', {
+            type: 'button', class: 'botao botao-secundario botao-pequeno',
+            onClick: () => abrirGerenciadorColunas(renderExtras, 'cliente'),
+          }, icone('colunas', 16), extras.length ? 'Gerenciar colunas' : 'Nova coluna'))
+        : null,
+    ].filter(Boolean));
+  }
+  renderExtras();
+
   const form = el('form', { class: 'formulario', novalidate: true, id: `fcli-${Date.now()}` },
     el('div', { class: 'grade grade-2' },
       campo('Nome ou razão social', nome, { nome: 'nome', obrigatorio: true, classe: 'coluna-inteira' }),
       campo('CPF ou CNPJ', documento, { nome: 'documento' }),
       campo('Telefone', telefone, { nome: 'telefone' }),
       campo('E-mail', email, { nome: 'email', classe: 'coluna-inteira' }),
-      campo('Observações', observacoes, { nome: 'observacoes', classe: 'coluna-inteira' })));
+      campo('Observações', observacoes, { nome: 'observacoes', classe: 'coluna-inteira' })),
+    grupoExtra);
   const salvar = el('button', { type: 'submit', class: 'botao botao-primario', form: form.id, text: cliente ? 'Salvar alterações' : 'Cadastrar cliente' });
   m.corpo.append(form);
   m.rodape.append(el('button', { type: 'button', class: 'botao botao-secundario', text: 'Cancelar', onClick: () => m.fechar() }), salvar);
@@ -58,6 +98,7 @@ export function abrirFormCliente(cliente, aoSalvar) {
     }
     const corpo = {
       nome: nome.value, documento: documento.value, email: email.value, telefone: telefone.value, observacoes: observacoes.value,
+      campos: Object.fromEntries(extras.map(({ col, controle }) => [col.id, controle.value])),
     };
     await ocupado(salvar, async () => {
       try {
@@ -97,16 +138,85 @@ export async function excluirCliente(cliente, total) {
 
 // ---------- Lista ----------
 
+const CHAVE_OCULTAS = 'gd:clientes:ocultas:v1';
+
+// Colunas padrão que podem ser ocultadas (o nome do cliente fica sempre visível)
+const COLUNAS_PADRAO = [
+  { chave: 'contato', rotulo: 'Contato' },
+  { chave: 'total', rotulo: 'Demandas', num: true },
+  { chave: 'abertas', rotulo: 'Em aberto', num: true },
+  { chave: 'vencidas', rotulo: 'Vencidas', num: true },
+];
+
 export function renderClientes(raiz) {
   let termo = '';
-  const busca = el('input', { type: 'search', class: 'busca-input', placeholder: 'Buscar por nome, documento, e-mail ou telefone', 'aria-label': 'Buscar clientes' });
+  let lista = [];
+  // Guarda as colunas ocultas (e não as visíveis) para que colunas novas já apareçam
+  const ocultas = new Set(recuperar(CHAVE_OCULTAS, []));
+  const busca = el('input', { type: 'search', class: 'busca-input', placeholder: 'Buscar por nome, documento, e-mail, telefone ou campos adicionais', 'aria-label': 'Buscar clientes' });
   const area = el('div', { class: 'tabela-area' });
   const contagem = el('p', { class: 'contagem' });
+
+  const colunasDisponiveis = () => [
+    ...COLUNAS_PADRAO,
+    ...estado.colunasClientes.map((col) => ({ chave: `extra_${col.id}`, rotulo: col.nome, col })),
+  ];
+  const visiveis = () => colunasDisponiveis().filter((c) => !ocultas.has(c.chave));
+
+  // Menu "Exibir colunas"
+  const menuExibir = el('div', { class: 'menu menu-exibir', hidden: true, role: 'group', 'aria-label': 'Colunas visíveis' });
+  const botaoExibir = el('button', {
+    type: 'button', class: 'botao botao-secundario', 'aria-haspopup': 'true', 'aria-expanded': 'false',
+    onClick: (e) => {
+      e.stopPropagation();
+      if (menuExibir.hidden) abrirMenuExibir(); else fecharMenuExibir();
+    },
+  }, icone('filtro', 18), el('span', { text: 'Exibir colunas' }));
+  const fecharAoClicarFora = (e) => { if (!menuExibir.contains(e.target)) fecharMenuExibir(); };
+  function abrirMenuExibir() {
+    renderMenuExibir();
+    menuExibir.hidden = false;
+    botaoExibir.setAttribute('aria-expanded', 'true');
+    setTimeout(() => document.addEventListener('click', fecharAoClicarFora));
+  }
+  function fecharMenuExibir() {
+    menuExibir.hidden = true;
+    botaoExibir.setAttribute('aria-expanded', 'false');
+    document.removeEventListener('click', fecharAoClicarFora);
+  }
+  function renderMenuExibir() {
+    limpar(menuExibir).append(...[
+      el('p', { class: 'menu-titulo', text: 'Colunas visíveis' }),
+      el('label', { class: 'checagem' }, el('input', { type: 'checkbox', checked: true, disabled: true }), 'Cliente'),
+      ...colunasDisponiveis().map((c) => {
+        const caixa = el('input', { type: 'checkbox', checked: !ocultas.has(c.chave) });
+        caixa.addEventListener('change', () => {
+          if (caixa.checked) ocultas.delete(c.chave); else ocultas.add(c.chave);
+          guardar(CHAVE_OCULTAS, [...ocultas]);
+          renderTabela();
+        });
+        return el('label', { class: 'checagem' }, caixa, c.rotulo);
+      }),
+      ocultas.size
+        ? el('button', {
+          type: 'button', class: 'menu-rodape',
+          onClick: () => { ocultas.clear(); guardar(CHAVE_OCULTAS, []); renderMenuExibir(); renderTabela(); },
+        }, 'Mostrar todas')
+        : null,
+    ].filter(Boolean));
+  }
+
+  const aoMudarColunas = () => { renderTabela(); if (!menuExibir.hidden) renderMenuExibir(); };
 
   limpar(raiz).append(
     el('header', { class: 'cabecalho-pagina' },
       el('div', {}, el('h1', { text: 'Clientes' }), el('p', { class: 'cabecalho-texto', text: 'Abra um cliente para ver as demandas vinculadas.' })),
-      el('div', { class: 'cabecalho-acoes' },
+      el('div', { class: `cabecalho-acoes${ehAdmin() ? ' acoes-tres' : ''}` },
+        el('span', { class: 'menu-wrap' }, botaoExibir, menuExibir),
+        ehAdmin()
+          ? el('button', { type: 'button', class: 'botao botao-secundario', onClick: () => abrirGerenciadorColunas(() => carregar(), 'cliente') },
+            icone('colunas', 18), el('span', { text: 'Colunas' }))
+          : null,
         el('button', { type: 'button', class: 'botao botao-primario', onClick: () => abrirFormCliente(null, (id) => { location.hash = `#/clientes/${id}`; }) },
           icone('mais', 18), el('span', { text: 'Novo cliente' })))),
     el('section', { class: 'barra-filtros' }, el('div', { class: 'busca' }, icone('busca', 18), busca)),
@@ -114,49 +224,68 @@ export function renderClientes(raiz) {
 
   busca.addEventListener('input', debounce(() => { termo = busca.value.trim(); carregar(); }, 300));
 
+  function celulaPadrao(chave, c) {
+    switch (chave) {
+      case 'contato':
+        return el('td', { dataset: { rotulo: 'Contato' } },
+          el('span', { text: c.email || '' }), c.telefone ? el('small', { class: 'celula-sub', text: c.telefone }) : null,
+          !c.email && !c.telefone ? el('span', { class: 'meta', text: 'Sem contato' }) : null);
+      case 'total':
+        return el('td', { class: 'num', dataset: { rotulo: 'Demandas' }, text: String(c.total) });
+      case 'abertas':
+        return el('td', { class: 'num', dataset: { rotulo: 'Em aberto' }, text: String(c.abertas) });
+      case 'vencidas':
+        return el('td', { class: `num${c.vencidas ? ' texto-vencido' : ''}`, dataset: { rotulo: 'Vencidas' }, text: String(c.vencidas) });
+      default:
+        return null;
+    }
+  }
+
+  function renderTabela() {
+    limpar(area);
+    contagem.textContent = lista.length === 1 ? '1 cliente' : `${lista.length} clientes`;
+    if (!lista.length) {
+      area.append(termo
+        ? vazio('Nenhum cliente encontrado.', 'Tente outro termo de busca.')
+        : vazio('Nenhum cliente cadastrado.', ehAdmin() ? 'Cadastre o primeiro cliente para registrar demandas.' : 'Cadastre um cliente ou peça acesso a um administrador.',
+          el('button', { type: 'button', class: 'botao botao-primario', text: 'Cadastrar cliente', onClick: () => abrirFormCliente(null, carregar) })));
+      return;
+    }
+    const cols = visiveis();
+    const tbody = el('tbody', {}, lista.map((c) => {
+      const tr = el('tr', { class: 'linha-clicavel' },
+        el('td', { class: 'col-nome', dataset: { rotulo: 'Cliente' } },
+          el('a', { href: `#/clientes/${c.id}`, class: 'link-forte', text: c.nome }),
+          c.documento ? el('small', { class: 'celula-sub', text: c.documento }) : null),
+        cols.map((k) => (k.col
+          ? el('td', { class: `col-extra${k.col.tipo === 'numero' ? ' num' : ''}`, dataset: { rotulo: k.rotulo }, text: valorLegivel(k.col, c.campos?.[k.col.id]) })
+          : celulaPadrao(k.chave, c))),
+        el('td', { class: 'col-acoes', dataset: { rotulo: 'Ações' } },
+          el('div', { class: 'acoes-linha' },
+            el('button', { type: 'button', class: 'botao-icone', 'aria-label': `Editar ${c.nome}`, title: 'Editar', onClick: async (e) => {
+              e.stopPropagation();
+              try { abrirFormCliente(await get(`/api/clientes/${c.id}`), carregar); } catch (x) { erro(x.message); }
+            } }, icone('lapis', 17)),
+            el('button', { type: 'button', class: 'botao-icone perigo', 'aria-label': `Excluir ${c.nome}`, title: 'Excluir', onClick: async (e) => {
+              e.stopPropagation();
+              if (await excluirCliente(c, c.total)) carregar();
+            } }, icone('lixeira', 17)))));
+      tr.addEventListener('click', (e) => { if (!e.target.closest('button, a')) location.hash = `#/clientes/${c.id}`; });
+      return tr;
+    }));
+    area.append(el('div', { class: 'tabela-rolagem' }, el('table', { class: 'tabela tabela-clientes' },
+      el('thead', {}, el('tr', {},
+        el('th', { scope: 'col', text: 'Cliente' }),
+        cols.map((k) => el('th', { scope: 'col', class: k.col ? `col-extra${k.col.tipo === 'numero' ? ' num' : ''}` : (k.num ? 'num' : ''), text: k.rotulo })),
+        el('th', { scope: 'col', class: 'col-acoes' }, el('span', { class: 'sr', text: 'Ações' })))),
+      tbody)));
+  }
+
   async function carregar() {
     area.classList.add('carregando');
     try {
-      const lista = await get(`/api/clientes${termo ? `?busca=${encodeURIComponent(termo)}` : ''}`);
-      limpar(area);
-      contagem.textContent = lista.length === 1 ? '1 cliente' : `${lista.length} clientes`;
-      if (!lista.length) {
-        area.append(termo
-          ? vazio('Nenhum cliente encontrado.', 'Tente outro termo de busca.')
-          : vazio('Nenhum cliente cadastrado.', ehAdmin() ? 'Cadastre o primeiro cliente para registrar demandas.' : 'Cadastre um cliente ou peça acesso a um administrador.',
-            el('button', { type: 'button', class: 'botao botao-primario', text: 'Cadastrar cliente', onClick: () => abrirFormCliente(null, carregar) })));
-        return;
-      }
-      const tbody = el('tbody', {}, lista.map((c) => {
-        const tr = el('tr', { class: 'linha-clicavel' },
-          el('td', { class: 'col-nome', dataset: { rotulo: 'Cliente' } },
-            el('a', { href: `#/clientes/${c.id}`, class: 'link-forte', text: c.nome }),
-            c.documento ? el('small', { class: 'celula-sub', text: c.documento }) : null),
-          el('td', { dataset: { rotulo: 'Contato' } },
-            el('span', { text: c.email || '' }), c.telefone ? el('small', { class: 'celula-sub', text: c.telefone }) : null,
-            !c.email && !c.telefone ? el('span', { class: 'meta', text: 'Sem contato' }) : null),
-          el('td', { class: 'num', dataset: { rotulo: 'Demandas' }, text: String(c.total) }),
-          el('td', { class: 'num', dataset: { rotulo: 'Em aberto' }, text: String(c.abertas) }),
-          el('td', { class: `num${c.vencidas ? ' texto-vencido' : ''}`, dataset: { rotulo: 'Vencidas' }, text: String(c.vencidas) }),
-          el('td', { class: 'col-acoes', dataset: { rotulo: 'Ações' } },
-            el('div', { class: 'acoes-linha' },
-              el('button', { type: 'button', class: 'botao-icone', 'aria-label': `Editar ${c.nome}`, title: 'Editar', onClick: async (e) => {
-                e.stopPropagation();
-                try { abrirFormCliente(await get(`/api/clientes/${c.id}`), carregar); } catch (x) { erro(x.message); }
-              } }, icone('lapis', 17)),
-              el('button', { type: 'button', class: 'botao-icone perigo', 'aria-label': `Excluir ${c.nome}`, title: 'Excluir', onClick: async (e) => {
-                e.stopPropagation();
-                if (await excluirCliente(c, c.total)) carregar();
-              } }, icone('lixeira', 17)))));
-        tr.addEventListener('click', (e) => { if (!e.target.closest('button, a')) location.hash = `#/clientes/${c.id}`; });
-        return tr;
-      }));
-      area.append(el('div', { class: 'tabela-rolagem' }, el('table', { class: 'tabela tabela-clientes' },
-        el('thead', {}, el('tr', {},
-          el('th', { scope: 'col', text: 'Cliente' }), el('th', { scope: 'col', text: 'Contato' }),
-          el('th', { scope: 'col', class: 'num', text: 'Demandas' }), el('th', { scope: 'col', class: 'num', text: 'Em aberto' }),
-          el('th', { scope: 'col', class: 'num', text: 'Vencidas' }), el('th', { scope: 'col', class: 'col-acoes' }, el('span', { class: 'sr', text: 'Ações' })))),
-        tbody)));
+      lista = await get(`/api/clientes${termo ? `?busca=${encodeURIComponent(termo)}` : ''}`);
+      aoMudarColunas();
     } catch (e) {
       limpar(area).append(vazio('Não foi possível carregar os clientes.', e.message));
     } finally {
@@ -191,6 +320,8 @@ export async function renderCliente(raiz, id) {
   const dados = el('dl', { class: 'dados-cliente' },
     ...[['CPF/CNPJ', c.documento], ['E-mail', c.email], ['Telefone', c.telefone], ['Cadastrado em', dataHoraBr(c.criado_em)]]
       .map(([k, v]) => el('div', {}, el('dt', { text: k }), el('dd', { text: v || 'Não informado' }))),
+    ...estado.colunasClientes.map((col) => el('div', {},
+      el('dt', { text: col.nome }), el('dd', { text: valorLegivel(col, c.campos?.[col.id]) || 'Não informado' }))),
     c.observacoes ? el('div', { class: 'coluna-inteira' }, el('dt', { text: 'Observações' }), el('dd', { class: 'pre', text: c.observacoes })) : null,
     c.usuariosComAcesso ? el('div', { class: 'coluna-inteira' }, el('dt', { text: 'Usuários com acesso (além dos administradores)' }),
       el('dd', { text: c.usuariosComAcesso.length ? c.usuariosComAcesso.map((u) => u.nome).join(', ') : 'Nenhum' })) : null);

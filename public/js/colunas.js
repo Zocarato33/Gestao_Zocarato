@@ -2,15 +2,23 @@ import {
   el, campo, opcoesSelect, abrirModal, confirmar, sucesso, erro, ocupado, limparErros,
   tratarErroFormulario, icone, limpar, TIPOS_COLUNA,
 } from './ui.js';
-import { post, put, del, estado, recarregarColunas } from './api.js';
+import { post, put, del, colunasDe, recarregarColunas } from './api.js';
+
+// Textos que mudam conforme a tela a que a coluna pertence
+const TEXTOS = {
+  demanda: { plural: 'demandas', item: 'demanda(s)', subtitulo: 'Crie campos próprios para registrar informações em cada demanda.' },
+  cliente: { plural: 'clientes', item: 'cliente(s)', subtitulo: 'Crie campos próprios para registrar informações em cada cliente.' },
+};
+const textos = (entidade) => TEXTOS[entidade] || TEXTOS.demanda;
 
 /** Confirma e exclui uma coluna. Retorna true se excluiu. */
 export async function excluirColuna(col) {
+  const t = textos(col.entidade);
   const ok = await confirmar({
     titulo: `Excluir a coluna "${col.nome}"?`,
-    mensagem: 'A coluna será removida da tabela e dos formulários de todas as demandas.',
+    mensagem: `A coluna será removida da tabela e dos formulários de todos os ${t.plural}.`,
     detalhe: col.preenchidos
-      ? `Os dados desta coluna serão removidos: ${col.preenchidos} demanda(s) têm valor preenchido. Esta ação não pode ser desfeita.`
+      ? `Os dados desta coluna serão removidos: ${col.preenchidos} ${t.item} têm valor preenchido. Esta ação não pode ser desfeita.`
       : 'Os dados desta coluna serão removidos. Esta ação não pode ser desfeita.',
     botao: 'Excluir coluna e dados',
   });
@@ -18,7 +26,7 @@ export async function excluirColuna(col) {
   try {
     const r = await del(`/api/colunas/${col.id}`);
     sucesso(r.mensagem);
-    await recarregarColunas();
+    await recarregarColunas(col.entidade);
     return true;
   } catch (e) {
     erro(e.message);
@@ -57,7 +65,7 @@ export function abrirEdicaoColuna(col, aoMudar) {
         if (opcoes) corpo.opcoes = opcoes.value.split('\n');
         const r = await put(`/api/colunas/${col.id}`, corpo);
         sucesso(r.mensagem);
-        await recarregarColunas();
+        await recarregarColunas(col.entidade);
         m.fechar();
         if (aoMudar) aoMudar();
       } catch (e) {
@@ -68,12 +76,16 @@ export function abrirEdicaoColuna(col, aoMudar) {
   nome.select();
 }
 
-/** Modal com a lista de colunas e o formulário para adicionar novas. */
-export function abrirGerenciadorColunas(aoMudar) {
+/**
+ * Modal com a lista de colunas e o formulário para adicionar novas.
+ * @param {Function} aoMudar chamada ao fechar, se alguma coluna foi criada, renomeada ou excluída
+ * @param {'demanda'|'cliente'} entidade tela a que as colunas pertencem
+ */
+export function abrirGerenciadorColunas(aoMudar, entidade = 'demanda') {
   let mudou = false;
   const m = abrirModal({
-    titulo: 'Colunas da tabela',
-    subtitulo: 'Crie campos próprios para registrar informações em cada demanda.',
+    titulo: entidade === 'cliente' ? 'Colunas de clientes' : 'Colunas da tabela',
+    subtitulo: textos(entidade).subtitulo,
     largura: 'media',
     onFechar: () => { if (mudou && aoMudar) aoMudar(); },
   });
@@ -82,11 +94,12 @@ export function abrirGerenciadorColunas(aoMudar) {
 
   function renderLista() {
     limpar(lista);
-    if (!estado.colunas.length) {
+    const colunas = colunasDe(entidade);
+    if (!colunas.length) {
       lista.append(el('li', { class: 'lista-colunas-vazia', text: 'Nenhuma coluna personalizada ainda.' }));
       return;
     }
-    for (const col of estado.colunas) {
+    for (const col of colunas) {
       lista.append(el('li', { class: 'coluna-item' },
         el('div', { class: 'coluna-info' },
           el('strong', { text: col.nome }),
@@ -108,7 +121,9 @@ export function abrirGerenciadorColunas(aoMudar) {
     }
   }
 
-  const nome = el('input', { type: 'text', maxlength: 40, placeholder: 'Ex.: Valor da causa', required: true });
+  const nome = el('input', {
+    type: 'text', maxlength: 40, required: true, placeholder: entidade === 'cliente' ? 'Ex.: Segmento' : 'Ex.: Valor da causa',
+  });
   const tipo = el('select', {}, opcoesSelect(TIPOS_COLUNA, 'texto'));
   const opcoes = el('textarea', { rows: 4, placeholder: 'Uma opção por linha' });
   const campoOpcoes = campo('Opções da lista', opcoes, { nome: 'opcoes', obrigatorio: true, ajuda: 'Uma opção por linha.' });
@@ -137,10 +152,10 @@ export function abrirGerenciadorColunas(aoMudar) {
     await ocupado(adicionar, async () => {
       try {
         const r = await post('/api/colunas', {
-          nome: nome.value, tipo: tipo.value, opcoes: tipo.value === 'lista' ? opcoes.value.split('\n') : undefined,
+          nome: nome.value, tipo: tipo.value, entidade, opcoes: tipo.value === 'lista' ? opcoes.value.split('\n') : undefined,
         });
         sucesso(r.mensagem);
-        await recarregarColunas();
+        await recarregarColunas(entidade);
         mudou = true;
         form.reset();
         campoOpcoes.hidden = true;

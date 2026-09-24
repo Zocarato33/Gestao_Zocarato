@@ -3,11 +3,12 @@
 const express = require('express');
 const { db, transacao } = require('../db');
 const { filtroClientes, podeAcessarCliente, ehAdmin } = require('../auth');
-const { Validador, naoEncontrado, idParam, hoje, termoLike } = require('../validacao');
+const { Validador, naoEncontrado, idParam, hoje, termoLike, validarValorColuna } = require('../validacao');
+const { listarColunas } = require('./colunas');
 
 const r = express.Router();
 
-function validarCliente(body) {
+async function validarCliente(body) {
   const v = new Validador(body)
     .texto('nome', 'o nome do cliente', { obrigatorio: true, min: 2, max: 150 })
     .texto('documento', 'o CPF/CNPJ', { max: 20 })
@@ -21,7 +22,42 @@ function validarCliente(body) {
   }
   const tel = v.saida.telefone;
   if (tel && !/^[\d\s()+-]{8,30}$/.test(tel)) v.erro('telefone', 'Informe um telefone válido.');
-  return v.verificar();
+
+  // Campos personalizados (apenas os enviados são alterados)
+  const brutos = body.campos && typeof body.campos === 'object' ? body.campos : {};
+  const campos = {};
+  for (const col of await listarColunas('cliente')) {
+    if (!Object.prototype.hasOwnProperty.call(brutos, col.id)) continue;
+    const res = validarValorColuna(col, brutos[col.id]);
+    if (res.erro) v.erro(`campo_${col.id}`, `${col.nome}: ${res.erro}`);
+    else campos[col.id] = res.valor;
+  }
+  const d = v.verificar();
+  d.campos = campos;
+  return d;
+}
+
+async function salvarCampos(t, clienteId, campos) {
+  for (const [colId, valor] of Object.entries(campos)) {
+    if (valor === null) {
+      await t.exec('DELETE FROM valores_colunas_clientes WHERE cliente_id = ? AND coluna_id = ?', [clienteId, Number(colId)]);
+    } else {
+      await t.exec(`INSERT INTO valores_colunas_clientes (cliente_id, coluna_id, valor) VALUES (?, ?, ?)
+        ON CONFLICT (cliente_id, coluna_id) DO UPDATE SET valor = excluded.valor`, [clienteId, Number(colId), valor]);
+    }
+  }
+}
+
+/** Valores das colunas personalizadas, por cliente: { [clienteId]: { [colunaId]: valor } }. */
+async function camposDosClientes(ids) {
+  const mapa = new Map();
+  if (!ids.length) return mapa;
+  const linhas = await db.all('SELECT cliente_id, coluna_id, valor FROM valores_colunas_clientes WHERE cliente_id = ANY(?)', [ids]);
+  for (const l of linhas) {
+    if (!mapa.has(l.cliente_id)) mapa.set(l.cliente_id, {});
+    mapa.get(l.cliente_id)[l.coluna_id] = l.valor;
+  }
+  return mapa;
 }
 
 async function carregarAcessivel(usuario, id) {
@@ -43,13 +79,15 @@ r.get('/', async (req, res) => {
     WHERE ${f.sql}`;
   if (busca) {
     sql += ` AND (c.nome ILIKE ? ESCAPE '\\' OR c.documento ILIKE ? ESCAPE '\\'
-      OR c.email ILIKE ? ESCAPE '\\' OR c.telefone ILIKE ? ESCAPE '\\')`;
+      OR c.email ILIKE ? ESCAPE '\\' OR c.telefone ILIKE ? ESCAPE '\\'
+      OR EXISTS (SELECT 1 FROM valores_colunas_clientes v WHERE v.cliente_id = c.id AND v.valor ILIKE ? ESCAPE '\\'))`;
     const termo = termoLike(busca);
-    params.push(termo, termo, termo, termo);
+    params.push(termo, termo, termo, termo, termo);
   }
   sql += ' GROUP BY c.id ORDER BY lower(c.nome)';
   const lista = await db.all(sql, params);
-  res.json(lista.map((c) => ({ ...c, abertas: c.abertas || 0, vencidas: c.vencidas || 0 })));
+  const campos = await camposDosClientes(lista.map((c) => c.id));
+  res.json(lista.map((c) => ({ ...c, abertas: c.abertas || 0, vencidas: c.vencidas || 0, campos: campos.get(c.id) || {} })));
 });
 
 r.get('/:id', async (req, res) => {
@@ -69,6 +107,7 @@ r.get('/:id', async (req, res) => {
     : undefined;
   res.json({
     ...cliente,
+    campos: (await camposDosClientes([id])).get(id) || {},
     hoje: h,
     demandas: demandas.map((d) => ({ ...d, vencida: !!d.vencida })),
     usuariosComAcesso,
@@ -76,7 +115,7 @@ r.get('/:id', async (req, res) => {
 });
 
 r.post('/', async (req, res) => {
-  const d = validarCliente(req.body);
+  const d = await validarCliente(req.body);
   const id = await transacao(async (t) => {
     const novo = await t.get(`INSERT INTO clientes (nome, documento, email, telefone, observacoes, criado_por)
       VALUES (?, ?, ?, ?, ?, ?) RETURNING id`, [d.nome, d.documento, d.email, d.telefone, d.observacoes, req.usuario.id]);
@@ -84,6 +123,7 @@ r.post('/', async (req, res) => {
     if (!ehAdmin(req.usuario)) {
       await t.exec('INSERT INTO usuario_clientes (usuario_id, cliente_id) VALUES (?, ?)', [req.usuario.id, novo.id]);
     }
+    await salvarCampos(t, novo.id, d.campos);
     return novo.id;
   });
   res.status(201).json({ id, mensagem: 'Cliente cadastrado com sucesso.' });
@@ -92,9 +132,12 @@ r.post('/', async (req, res) => {
 r.put('/:id', async (req, res) => {
   const id = idParam(req.params.id);
   await carregarAcessivel(req.usuario, id);
-  const d = validarCliente(req.body);
-  await db.exec(`UPDATE clientes SET nome = ?, documento = ?, email = ?, telefone = ?, observacoes = ?,
-    atualizado_em = now() WHERE id = ?`, [d.nome, d.documento, d.email, d.telefone, d.observacoes, id]);
+  const d = await validarCliente(req.body);
+  await transacao(async (t) => {
+    await t.exec(`UPDATE clientes SET nome = ?, documento = ?, email = ?, telefone = ?, observacoes = ?,
+      atualizado_em = now() WHERE id = ?`, [d.nome, d.documento, d.email, d.telefone, d.observacoes, id]);
+    await salvarCampos(t, id, d.campos);
+  });
   res.json({ mensagem: 'Cliente atualizado com sucesso.' });
 });
 

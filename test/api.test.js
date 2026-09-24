@@ -311,3 +311,53 @@ test('datas de criação são devolvidas em ISO 8601', async () => {
   const r = await admin.req('GET', `/api/demandas/${ids.d3}`);
   assert.match(r.dados.criado_em, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z$/);
 });
+
+test('colunas personalizadas de clientes', async () => {
+  // Apenas administradores criam; nome é único por tela e pode repetir o de uma coluna de demanda
+  assert.equal((await ana.req('POST', '/api/auth/login', { email: 'ana@teste.com', senha: 'NovaSenha99' })).status, 200);
+  assert.equal((await ana.req('POST', '/api/colunas', { nome: 'Segmento', tipo: 'texto', entidade: 'cliente' })).status, 403);
+  let r = await admin.req('POST', '/api/colunas', { nome: 'Telefone', tipo: 'texto', entidade: 'cliente' });
+  assert.equal(r.status, 422, 'nome reservado de cliente');
+  r = await admin.req('POST', '/api/colunas', { nome: 'Audiência', tipo: 'data', entidade: 'cliente' });
+  assert.equal(r.status, 201, 'mesmo nome de coluna de demanda é permitido em clientes');
+  ids.colCliData = r.dados.id;
+  r = await admin.req('POST', '/api/colunas', { nome: 'Segmento', tipo: 'lista', opcoes: ['Banco', 'Varejo'], entidade: 'cliente' });
+  ids.colCliSeg = r.dados.id;
+  r = await admin.req('POST', '/api/colunas', { nome: 'segmento', tipo: 'texto', entidade: 'cliente' });
+  assert.equal(r.status, 422, 'nome duplicado na mesma tela');
+
+  // As listas não se misturam
+  r = await admin.req('GET', '/api/colunas?entidade=cliente');
+  assert.deepEqual(r.dados.map((c) => c.nome), ['Audiência', 'Segmento']);
+  r = await admin.req('GET', '/api/colunas');
+  assert.ok(r.dados.every((c) => c.entidade === 'demanda'));
+
+  // Validação e gravação dos valores
+  r = await admin.req('POST', '/api/clientes', { nome: 'Varejo Ômega', campos: { [ids.colCliSeg]: 'Indústria' } });
+  assert.equal(r.status, 422);
+  assert.ok(r.dados.campos[`campo_${ids.colCliSeg}`]);
+  r = await admin.req('POST', '/api/clientes', { nome: 'Varejo Ômega', campos: { [ids.colCliSeg]: 'Varejo', [ids.colCliData]: '2026-11-03' } });
+  assert.equal(r.status, 201);
+  ids.omega = r.dados.id;
+  r = await admin.req('GET', `/api/clientes/${ids.omega}`);
+  assert.deepEqual(r.dados.campos, { [ids.colCliSeg]: 'Varejo', [ids.colCliData]: '2026-11-03' });
+
+  // Edição altera só os campos enviados; valor vazio apaga
+  r = await admin.req('PUT', `/api/clientes/${ids.omega}`, { nome: 'Varejo Ômega', campos: { [ids.colCliData]: '' } });
+  assert.equal(r.status, 200);
+  r = await admin.req('GET', '/api/clientes');
+  const omega = r.dados.find((c) => c.id === ids.omega);
+  assert.deepEqual(omega.campos, { [ids.colCliSeg]: 'Varejo' });
+
+  // Busca encontra pelo valor da coluna personalizada
+  r = await admin.req('GET', '/api/clientes?busca=varejo');
+  assert.deepEqual(r.dados.map((c) => c.id), [ids.omega]);
+
+  // Remover opção da lista apaga os valores; excluir a coluna também
+  r = await admin.req('PUT', `/api/colunas/${ids.colCliSeg}`, { nome: 'Segmento', opcoes: ['Banco'] });
+  assert.match(r.dados.mensagem, /1 valor/);
+  r = await admin.req('DELETE', `/api/colunas/${ids.colCliData}`);
+  assert.equal(r.status, 200);
+  r = await admin.req('GET', '/api/colunas?entidade=cliente');
+  assert.deepEqual(r.dados.map((c) => c.nome), ['Segmento']);
+});
