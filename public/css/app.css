@@ -232,13 +232,21 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .col-acoes { width: 1%; }
 .col-id { width: 1%; }
 
-/* Tabela editável: cresce conforme as colunas e rola na horizontal; número e título ficam fixos */
+/* Tabela de demandas: cresce conforme as colunas e rola na horizontal.
+   Quando número e título são as duas primeiras colunas, ficam fixos na rolagem. */
 .tabela-demandas { width: max-content; min-width: 100%; }
-.tabela-demandas td { padding: 4px 6px; background: var(--fundo-linha, var(--branco)); }
-.tabela-demandas tbody tr:hover { --fundo-linha: #F8FAFB; }
-.tabela-demandas .col-id { position: sticky; left: 0; z-index: 2; width: 56px; min-width: 56px; }
-.tabela-demandas .col-titulo { position: sticky; left: 56px; z-index: 2; box-shadow: 1px 0 0 var(--linha-suave); }
-.tabela-demandas th.col-id, .tabela-demandas th.col-titulo { z-index: 3; }
+.tabela-demandas td { padding: 10px 10px; background: var(--fundo-linha, var(--branco)); }
+.tabela-demandas tbody tr:hover { --fundo-linha: #F3F7F8; }
+.tabela-demandas .col-id { width: 56px; min-width: 56px; }
+.tabela-demandas.fixar-inicio .col-id { position: sticky; left: 0; z-index: 2; }
+.tabela-demandas.fixar-inicio .col-titulo { position: sticky; left: 56px; z-index: 2; box-shadow: 1px 0 0 var(--linha-suave); }
+.tabela-demandas.fixar-inicio th.col-id, .tabela-demandas.fixar-inicio th.col-titulo { z-index: 3; }
+.celula-titulo-texto { display: block; min-width: 220px; max-width: 360px; font-weight: 600; color: var(--verde); }
+tr.concluida .celula-titulo-texto { color: var(--chumbo); text-decoration: line-through; text-decoration-color: rgba(74,84,94,.4); }
+.tabela-demandas .col-cliente, .tabela-demandas .col-responsavel { min-width: 150px; }
+.tabela-demandas .col-extra { min-width: 130px; }
+tr.vencida .col-prazo .prazo-wrap > span { color: var(--alerta); font-weight: 600; }
+.tabela-demandas .prazo-situacao { padding-left: 0; }
 .tabela-demandas .celula-titulo { width: 300px; }
 .col-cliente .celula-input { min-width: 190px; }
 .col-responsavel .celula-input { min-width: 170px; }
@@ -558,4 +566,7 @@ th.col-extra { white-space: nowrap; }
   .nav-rotulo { display: none; }
   .nav-rotulo-curto { display: inline; }
   .nav-link { min-width: 0; }
+}
+@media (max-width: 760px) {
+  .celula-titulo-texto { min-width: 0; max-width: none; }
 }
