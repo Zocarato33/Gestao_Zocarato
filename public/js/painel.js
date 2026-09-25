@@ -1,9 +1,9 @@
 import {
   el, icone, limpar, opcoesSelect, debounce, sucesso, erro, confirmar, descreverPrazo, vazio,
-  guardar, recuperar, STATUS, PRIORIDADES,
+  guardar, recuperar, chipStatus, chipPrioridade, dataBr, numeroBr, STATUS, PRIORIDADES,
 } from './ui.js';
-import { get, patch, del, consulta, estado, ehAdmin, colunasTabela } from './api.js';
-import { abrirFormDemanda, controleColuna, preencherResponsaveis } from './demandaForm.js';
+import { get, del, consulta, estado, ehAdmin, colunasTabela } from './api.js';
+import { abrirFormDemanda } from './demandaForm.js';
 import { abrirGerenciadorColunas, abrirEdicaoColuna, excluirColuna } from './colunas.js';
 
 const CHAVE_FILTROS = 'gd:filtros:v1';
@@ -65,7 +65,7 @@ export function renderPainel(raiz) {
     el('header', { class: 'cabecalho-pagina' },
       el('div', {},
         el('h1', { text: 'Demandas' }),
-        el('p', { class: 'cabecalho-texto', text: 'Edite direto na tabela: cada alteração é salva na hora.' })),
+        el('p', { class: 'cabecalho-texto', text: 'Clique em uma demanda para abrir e editar.' })),
       acoes),
     indicadores,
     el('section', { class: 'barra-filtros', 'aria-label': 'Pesquisa e filtros' },
@@ -203,54 +203,37 @@ export function renderPainel(raiz) {
     return el('td', { dataset: { rotulo }, class: classe }, conteudo);
   }
 
+  /** Valor de uma coluna personalizada formatado para leitura. */
+  function valorLegivel(col, valor) {
+    if (valor === null || valor === undefined || valor === '') return '';
+    if (col.tipo === 'numero') return numeroBr(valor);
+    if (col.tipo === 'data') return dataBr(valor);
+    return String(valor);
+  }
+
+  // A tabela é só de visualização: as alterações são feitas ao abrir a demanda
   function linha(d) {
-    const tr = el('tr', { class: `${d.vencida ? 'vencida ' : ''}${d.status === 'concluida' ? 'concluida' : ''}`, dataset: { id: d.id } });
-
-    const titulo = el('input', { type: 'text', class: 'celula-input celula-titulo', value: d.titulo, maxlength: 200, 'aria-label': 'Título' });
-    titulo.addEventListener('keydown', (e) => { if (e.key === 'Enter') titulo.blur(); if (e.key === 'Escape') { titulo.value = d.titulo; titulo.blur(); } });
-    titulo.addEventListener('change', () => {
-      if (titulo.value.trim().length < 3) {
-        erro('O título deve ter ao menos 3 caracteres.');
-        titulo.value = d.titulo;
-        return;
-      }
-      salvar(d, { titulo: titulo.value });
+    const tr = el('tr', {
+      class: `linha-clicavel ${d.vencida ? 'vencida ' : ''}${d.status === 'concluida' ? 'concluida' : ''}`,
+      dataset: { id: d.id },
+      title: 'Abrir demanda',
     });
-
-    const cliente = el('select', { class: 'celula-input', 'aria-label': 'Cliente' },
-      opcoesSelect(estado.clientes.map((c) => [c.id, c.nome]), d.cliente_id));
-    if (!estado.clientes.some((c) => c.id === d.cliente_id)) cliente.prepend(el('option', { value: d.cliente_id, text: d.cliente_nome, selected: true }));
-    const resp = el('select', { class: 'celula-input', 'aria-label': 'Responsável' });
-    preencherResponsaveis(resp, d.cliente_id, d.responsavel_id);
-    cliente.addEventListener('change', () => {
-      const novo = Number(cliente.value);
-      // Se o responsável atual não atende o novo cliente, a demanda fica sem responsável
-      const mantem = d.responsavel_id && estado.responsaveis.some((r) => r.id === d.responsavel_id && (r.todos || r.clientes.includes(novo)));
-      salvar(d, { cliente_id: novo, ...(mantem ? {} : { responsavel_id: null }) });
-    });
-    resp.addEventListener('change', () => salvar(d, { responsavel_id: resp.value || null }));
-
-    const status = el('select', { class: `celula-input celula-status s-${d.status}`, 'aria-label': 'Status' }, opcoesSelect(STATUS, d.status));
-    status.addEventListener('change', () => salvar(d, { status: status.value }));
-    const prioridade = el('select', { class: `celula-input celula-prioridade p-${d.prioridade}`, 'aria-label': 'Prioridade' }, opcoesSelect(PRIORIDADES, d.prioridade));
-    prioridade.addEventListener('change', () => salvar(d, { prioridade: prioridade.value }));
-
-    const prazo = el('input', { type: 'date', class: 'celula-input', value: d.prazo || '', 'aria-label': 'Prazo' });
-    prazo.addEventListener('change', () => salvar(d, { prazo: prazo.value || null }));
-    const situacao = el('small', {
-      class: `prazo-situacao${d.vencida ? ' vencido' : ''}`,
-      text: descreverPrazo(d.prazo, dados.hoje, d.status === 'concluida'),
-    });
+    tr.addEventListener('click', (e) => { if (!e.target.closest('button, a')) abrir(d.id); });
 
     // Células padrão; a ordem e quais aparecem vêm do layout configurado
     const fixas = {
       id: () => celula('Nº', el('button', { type: 'button', class: 'link-id', text: `#${d.id}`, title: 'Abrir demanda', onClick: () => abrir(d.id) }), 'col-id'),
-      titulo: () => celula('Título', el('div', { class: 'titulo-wrap' }, titulo, el('small', { class: 'celula-sub', text: d.cliente_nome })), 'col-titulo'),
-      cliente: () => celula('Cliente', cliente, 'col-cliente'),
-      responsavel: () => celula('Responsável', resp, 'col-responsavel'),
-      status: () => celula('Status', status, 'col-status'),
-      prioridade: () => celula('Prioridade', prioridade, 'col-prioridade'),
-      prazo: () => celula('Prazo', el('div', { class: 'prazo-wrap' }, prazo, situacao), 'col-prazo'),
+      titulo: () => celula('Título', el('div', { class: 'titulo-wrap' },
+        el('strong', { class: 'celula-titulo-texto', text: d.titulo }), el('small', { class: 'celula-sub', text: d.cliente_nome })), 'col-titulo'),
+      cliente: () => celula('Cliente', el('span', { text: d.cliente_nome }), 'col-cliente'),
+      responsavel: () => celula('Responsável', d.responsavel_nome
+        ? el('span', { text: d.responsavel_nome })
+        : el('span', { class: 'meta', text: 'Sem responsável' }), 'col-responsavel'),
+      status: () => celula('Status', chipStatus(d.status), 'col-status'),
+      prioridade: () => celula('Prioridade', chipPrioridade(d.prioridade), 'col-prioridade'),
+      prazo: () => celula('Prazo', el('div', { class: 'prazo-wrap' },
+        d.prazo ? el('span', { text: dataBr(d.prazo) }) : null,
+        el('small', { class: `prazo-situacao${d.vencida ? ' vencido' : ''}`, text: descreverPrazo(d.prazo, dados.hoje, d.status === 'concluida') })), 'col-prazo'),
     };
 
     for (const item of colunasTabela('demanda')) {
@@ -259,19 +242,20 @@ export function renderPainel(raiz) {
         continue;
       }
       const col = estado.colunas.find((x) => x.id === item.coluna.id) || item.coluna;
-      const controle = controleColuna(col, d.campos[col.id], { class: 'celula-input', 'aria-label': col.nome });
-      if (controle.tagName === 'INPUT' && controle.type === 'text') {
-        controle.addEventListener('keydown', (e) => { if (e.key === 'Enter') controle.blur(); });
-      }
-      controle.addEventListener('change', () => salvar(d, { campos: { [col.id]: controle.value } }));
-      tr.append(celula(col.nome, controle, 'col-extra'));
+      tr.append(celula(col.nome, el('span', { text: valorLegivel(col, d.campos[col.id]) }), `col-extra${col.tipo === 'numero' ? ' num' : ''}`));
     }
 
     tr.append(celula('Ações', el('div', { class: 'acoes-linha' },
-      el('button', { type: 'button', class: 'botao-icone', title: 'Abrir e editar todos os campos', 'aria-label': `Abrir demanda ${d.id}`, onClick: () => abrir(d.id) }, icone('abrir', 17)),
+      el('button', { type: 'button', class: 'botao-icone', title: 'Abrir e editar', 'aria-label': `Abrir demanda ${d.id}`, onClick: () => abrir(d.id) }, icone('abrir', 17)),
       el('button', { type: 'button', class: 'botao-icone perigo', title: 'Excluir demanda', 'aria-label': `Excluir demanda ${d.id}`, onClick: () => excluir(d) }, icone('lixeira', 17))),
     'col-acoes'));
     return tr;
+  }
+
+  /** Número e título só ficam fixos na rolagem lateral quando são as duas primeiras colunas. */
+  function fixarInicio() {
+    const [a, b] = colunasTabela('demanda').map((i) => i.chave);
+    return a === 'id' && b === 'titulo';
   }
 
   function abrir(id) {
@@ -294,32 +278,6 @@ export function renderPainel(raiz) {
     }
   }
 
-  async function salvar(d, alteracao) {
-    const tr = tabelaArea.querySelector(`tr[data-id="${d.id}"]`);
-    if (tr) tr.classList.add('salvando');
-    try {
-      const r = await patch(`/api/demandas/${d.id}`, alteracao);
-      const i = dados.demandas.findIndex((x) => x.id === d.id);
-      if (i >= 0) dados.demandas[i] = r.demanda;
-      const nova = linha(r.demanda);
-      nova.classList.add('salvo');
-      if (tr) tr.replaceWith(nova);
-      sucesso('Alteração salva.');
-      atualizarIndicadores();
-    } catch (e) {
-      erro(e.campos ? Object.values(e.campos).join(' ') : e.message);
-      if (tr) tr.replaceWith(linha(d)); // desfaz a alteração na tela
-    }
-  }
-
-  async function atualizarIndicadores() {
-    try {
-      const r = await get(`/api/demandas${consulta(filtros)}`);
-      dados.indicadores = r.indicadores;
-      renderIndicadores();
-    } catch { /* indicadores serão atualizados no próximo carregamento */ }
-  }
-
   function renderTabela() {
     limpar(tabelaArea);
     const n = dados.demandas.length;
@@ -338,7 +296,7 @@ export function renderPainel(raiz) {
     }
     const tbody = el('tbody', {}, dados.demandas.map(linha));
     tabelaArea.append(el('div', { class: 'tabela-rolagem' },
-      el('table', { class: 'tabela tabela-demandas' }, cabecalho(), tbody)));
+      el('table', { class: `tabela tabela-demandas${fixarInicio() ? ' fixar-inicio' : ''}` }, cabecalho(), tbody)));
   }
 
   async function carregar() {

@@ -1,6 +1,6 @@
 # Gestor Legal Oper
 
-Sistema web para cadastrar clientes, registrar demandas, acompanhar prazos e manter a tabela de preços dos contratos, com autenticação, controle de acesso por cliente, colunas personalizadas, tabela editável e layout configurável (ordem, visibilidade e campos obrigatórios). Funciona em computador e celular.
+Sistema web para cadastrar clientes, registrar demandas, acompanhar prazos e manter a tabela de preços dos contratos, com autenticação, controle de acesso por cliente, colunas personalizadas e layout configurável (ordem, visibilidade e campos obrigatórios). Funciona em computador e celular.
 
 ## Sumário
 
@@ -167,9 +167,9 @@ A gestão de colunas é restrita a administradores porque excluir uma coluna apa
 - **Pesquisa**: procura em título, descrição, observações, nome do cliente, valores das colunas personalizadas e número da demanda (por exemplo, `#12`).
 - **Filtros**: cliente, responsável (inclui "sem responsável"), status (inclui "em aberto"), prioridade e prazo (vencidas, vencem hoje, próximos 7 dias, sem prazo ou período específico). Os filtros ficam guardados no navegador.
 - **Ordenação**: clique no nome da coluna. Clique de novo para inverter e uma terceira vez para voltar à ordem padrão (pendências primeiro, por prazo).
-- **Edição direta**: altere título, cliente, responsável, status, prioridade, prazo ou colunas personalizadas na própria tabela. Cada alteração é salva ao sair do campo ou pressionar Enter. Em caso de erro, o valor anterior é restaurado e a mensagem explica o motivo.
+- **Tabela só de visualização**: os campos da tabela não podem ser alterados ali. Para editar, abra a demanda.
 - **Prazos vencidos**: a linha recebe fundo e faixa vermelhos, e o prazo mostra há quantos dias venceu. Demandas concluídas nunca aparecem como vencidas.
-- **Abrir demanda**: o ícone de abrir (ou o número) mostra o formulário completo com descrição, observações e histórico de criação e alteração.
+- **Abrir demanda**: clique em qualquer ponto da linha (ou no número, ou no ícone de abrir) para ver o formulário completo, com todos os campos editáveis, descrição, observações e histórico de criação e alteração.
 
 ### Colunas personalizadas (administrador)
 
@@ -207,7 +207,7 @@ Tela para ajustar, em um só lugar, **Demandas**, **Clientes** e **Tabela de Pre
 - Campos que só existem no formulário (como Descrição, CPF ou CNPJ, e-mail) aparecem em uma seção separada, só com a regra de obrigatório.
 - Alguns itens são fixos para manter o sistema consistente: o título da demanda, o nome do cliente e o cliente da tabela de preços sempre aparecem e são sempre obrigatórios; colunas calculadas (como "Em aberto") não têm regra de obrigatório.
 - As alterações só valem depois de **Salvar alterações**. Trocar de aba com alterações pendentes pede confirmação.
-- Tornar um campo obrigatório não bloqueia registros antigos: na edição direta pela tabela, a regra só é conferida no campo que está sendo alterado.
+- Ao tornar um campo obrigatório, registros antigos sem esse campo continuam aparecendo normalmente; a regra passa a ser exigida quando o registro for aberto e salvo.
 
 Na lista de clientes, o menu **Exibir colunas** continua disponível para cada pessoa esconder, só para si, colunas liberadas no layout.
 
